@@ -166,15 +166,30 @@ class DataQualityIssue(_Model):
 class DataQualityScore(_Model):
     """数据质量评分（V2 §55），总分 0~100。
 
-    四个分项：``completeness`` 完整性、``continuity`` 连续性、
-    ``outlier`` 异常值、``source_credibility`` 来源可信度。
+    **计分采用加权制**（``DATA_IMPORT_SPEC.md`` §8.1），四个分项本身就是**加权分**，
+    量程各不相同，相加即为总分：
+
+    ====================  ======  ===================================
+    分项                  满分    含义
+    ====================  ======  ===================================
+    ``completeness``      40      完整性：有效时间点 / 应有时间点
+    ``continuity``        25      连续性：时间间隔是否规整
+    ``outlier``           20      异常值：异常点占比
+    ``source_credibility`` 15     来源可信度（按 ``SourceType`` 取值）
+    ====================  ======  ===================================
+
+    因此「完美数据」的满分取决于来源类型：``CONTRACT`` / ``POLICY`` 为 100，
+    ``USER_INPUT`` 为 96，``SYSTEM_DEFAULT`` 为 85 —— 分项量程已由模型强制，
+    写超即校验失败。
     """
 
-    score: float = Field(default=0.0, ge=0.0, le=100.0)
-    completeness: float = Field(default=0.0, ge=0.0, le=100.0)
-    continuity: float = Field(default=0.0, ge=0.0, le=100.0)
-    outlier: float = Field(default=0.0, ge=0.0, le=100.0)
-    source_credibility: float = Field(default=0.0, ge=0.0, le=100.0)
+    score: float = Field(default=0.0, ge=0.0, le=100.0, description="总分，四项加权之和")
+    completeness: float = Field(default=0.0, ge=0.0, le=40.0, description="完整性，满分 40")
+    continuity: float = Field(default=0.0, ge=0.0, le=25.0, description="连续性，满分 25")
+    outlier: float = Field(default=0.0, ge=0.0, le=20.0, description="异常值，满分 20")
+    source_credibility: float = Field(
+        default=0.0, ge=0.0, le=15.0, description="来源可信度，满分 15"
+    )
     issues: list[DataQualityIssue] = Field(default_factory=list)
 
     @property

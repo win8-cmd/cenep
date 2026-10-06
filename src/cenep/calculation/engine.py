@@ -64,9 +64,16 @@ class CalculationEngine:
         *,
         include_scenario: bool = True,
         include_sensitivity: bool = True,
+        year_override: dict[int, object] | None = None,
     ) -> CalculationResult:
-        """按规范 §82 计算并返回唯一的 :class:`CalculationResult`。"""
-        result = self._calculate_core(project)
+        """按规范 §82 计算并返回唯一的 :class:`CalculationResult`。
+
+        :param year_override: V2 时序口径覆盖表 ``{年份: YearOverride}``（V2 §62）。
+            为 ``None`` 时走纯 V1 年度模型，结果与 V1 **逐位一致**（V2 §1.1 兼容性承诺）。
+            非空时只替换该年的**电量与收益**，OPEX/折旧/税/融资/现金流/IRR/NPV
+            仍由同一套 V1 代码计算（V2 §61 单一计算源）。
+        """
+        result = self._calculate_core(project, year_override=year_override)
 
         if include_scenario and project.scenario.enabled:
             result.scenarios = self._run_scenarios(project)
@@ -77,7 +84,9 @@ class CalculationEngine:
     # ------------------------------------------------------------------ #
     # 核心计算（§82 第 1–27、30、31 步）
     # ------------------------------------------------------------------ #
-    def _calculate_core(self, project: Project) -> CalculationResult:
+    def _calculate_core(
+        self, project: Project, *, year_override: dict[int, object] | None = None
+    ) -> CalculationResult:
         # --- 1. Validate Inputs ---
         validator.validate_project(project)
 
@@ -322,6 +331,19 @@ class CalculationEngine:
                 + storage_other
             )
 
+            # 14b. V2 时序口径覆盖（V2 §62；year_override 为 None 时 V1 路径逐位不变）
+            #      位置必须在税与现金流之前：revenue_net / EBITDA / 税费都取自 total_revenue。
+            v2 = year_override.get(year) if year_override else None
+            if v2 is not None:
+                load = float(v2.load)
+                pv_self_use_revenue = float(v2.pv_self_use_revenue)
+                pv_export_revenue = float(v2.pv_export_revenue)
+                storage_arbitrage = float(v2.storage_arbitrage_revenue)
+                storage_capacity = float(v2.storage_capacity_revenue)
+                storage_ancillary = float(v2.storage_ancillary_revenue)
+                storage_other = float(v2.storage_other_revenue)
+                total_revenue = float(v2.total_revenue())
+
             # 16. OPEX
             opex_year = opx.opex_for_year(first_year_opex, float(o.annual_opex_growth_rate), year)
 
@@ -397,15 +419,17 @@ class CalculationEngine:
                 AnnualResult(
                     year=year,
                     load_kwh=load,
-                    pv_generation_kwh=allocation.generation,
-                    pv_self_use_kwh=allocation.direct_use,
-                    pv_export_kwh=allocation.export,
-                    pv_to_storage_kwh=allocation.to_storage,
+                    pv_generation_kwh=v2.pv_generation if v2 else allocation.generation,
+                    pv_self_use_kwh=v2.pv_self_use if v2 else allocation.direct_use,
+                    pv_export_kwh=v2.pv_export if v2 else allocation.export,
+                    pv_to_storage_kwh=v2.pv_to_storage if v2 else allocation.to_storage,
                     pv_loss_kwh=allocation.loss,
                     storage_available_kwh=storage_year.available_energy_kwh,
-                    storage_charge_kwh=storage_year.charge_energy_kwh,
-                    storage_discharge_kwh=storage_year.discharge_energy_kwh,
-                    storage_grid_charge_kwh=grid_charge,
+                    storage_charge_kwh=v2.storage_charge if v2 else storage_year.charge_energy_kwh,
+                    storage_discharge_kwh=(
+                        v2.storage_discharge if v2 else storage_year.discharge_energy_kwh
+                    ),
+                    storage_grid_charge_kwh=v2.grid_charge if v2 else grid_charge,
                     pv_self_use_revenue=pv_self_use_revenue,
                     pv_export_revenue=pv_export_revenue,
                     pv_other_revenue=pv_other_revenue,
