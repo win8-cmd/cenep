@@ -125,12 +125,33 @@ def v1_result(qapp):
 # --------------------------------------------------------------------------- #
 class TestV2ParameterSections:
     def test_section_count_and_fields(self):
-        """V2 §5：参数页要包含时序仿真相关分组，且每组都有字段。"""
+        """V2 §5：参数页要包含时序仿真相关分组，且每组都有字段。
+
+        字段总数按**全部分组**里的 ``timeseries.*`` 路径统计，而不是只看本文件
+        声明的那 5 个段 —— 字段可能被合理归并到别的分组（例如
+        ``timeseries.balance_tolerance`` 属数值校验参数，已并入「计算设置」），
+        按路径统计才不会因搬动而失效。
+        """
         assert len(ALL_SECTIONS) == 14
         for section in V2_SECTIONS:
             assert section.fields, f"{section.title} 没有字段"
-        new_fields = sum(len(s.fields) for s in V2_SECTIONS)
-        assert new_fields == 39, f"V2 新增字段数应为 39，实际 {new_fields}"
+
+        v2_paths = [
+            spec.path
+            for section in ALL_SECTIONS
+            for spec in section.fields
+            if spec.path.startswith("timeseries.")
+        ]
+        assert len(v2_paths) == 40, f"V2 时序参数应为 40 个，实际 {len(v2_paths)}"
+        assert len(set(v2_paths)) == len(v2_paths), "存在重复的字段路径"
+
+    def test_v2_fields_reachable_from_every_section(self):
+        """无论字段落在哪个分组，其路径都必须可在 ``Project`` 上访问。"""
+        project = Project()
+        for section in ALL_SECTIONS:
+            for spec in section.fields:
+                if spec.path.startswith("timeseries."):
+                    get_path(project, spec.path)
 
     @pytest.mark.parametrize("section", V2_SECTIONS, ids=lambda s: s.title)
     def test_section_form_builds(self, qapp, section):
@@ -316,7 +337,11 @@ class TestTimeSeriesPage:
         assert values["光伏容量"] == f"{v2_result.pv_capacity_kwp:,.2f} kWp"
         assert values["项目 NPV"] == f"{v2_result.project_npv:,.2f} 元"
         assert values["LCOE"] == f"{v2_result.lcoe:.4f} 元/kWh"
-        assert "20.03%" in values["项目 IRR"]
+        # 注意（跨会话修正）：此处曾硬编码 "20.03%"，那是**缺陷版本**的被高估 IRR
+        # （build_project 未显式设置 project_type → 年度模型不计储能造价，却计入
+        # 时序储能收益，V2 §105 口径不一致）。修复后项目 IRR 为 15.00%，与显式
+        # PV_STORAGE 完全一致，因此改为从结果派生，保持 §105 一致性语义且不会过期。
+        assert f"{v2_result.project_irr:.2%}" in values["项目 IRR"]
 
     def test_overview_covers_spec68_fields(self, qapp, v2_result):
         page = TimeSeriesPage()

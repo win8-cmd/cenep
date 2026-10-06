@@ -60,6 +60,19 @@ GENERAL_SECTION = SectionSpec(
     [
         FieldSpec("analysis_period", "项目生命周期", Kind.INT, "年", 1, 40, step=1, tooltip="规范 §15：Year 0 为建设期，Year 1 起为运营期"),
         FieldSpec("discount_rate", "折现率", Kind.PERCENT, "%", 0, 50),
+        # V2 §19：能量平衡容差是逐时仿真的**数值校验**参数（全局计算选项），
+        # 与「时序仿真总开关」段里的开关类字段不同类，放这里与总体计算口径同处一组。
+        FieldSpec(
+            "timeseries.balance_tolerance",
+            "时序能量平衡容差（V2 §19）",
+            Kind.FLOAT,
+            "kWh",
+            0,
+            1000,
+            decimals=8,
+            step=1e-06,
+            tooltip="V2 §19：任一小时偏差超过该值即判定计算失败，默认 1e-6",
+        ),
     ],
 )
 
@@ -320,16 +333,17 @@ TIMESERIES_SECTION = SectionSpec(
             tooltip="V2 §3 P0.1：决定平年 8760 / 闰年 8784",
         ),
         FieldSpec(
-            "timeseries.balance_tolerance",
-            "能量平衡容差",
-            Kind.FLOAT,
-            "kWh",
-            0,
-            1000,
-            decimals=8,
-            step=1e-06,
-            tooltip="V2 §19：任一小时偏差超过该值即判定计算失败，默认 1e-6",
+            "timeseries.optimization_enabled",
+            "启用方案寻优",
+            Kind.BOOL,
+            tooltip=(
+                "V2 §45–§48：开启后按扫描候选做方案寻优（逐候选时序仿真 + 最优候选精确复核），"
+                "耗时远高于常规计算，默认关闭；方案比较不受该开关影响"
+            ),
         ),
+        # 注：`timeseries.balance_tolerance`（能量平衡容差）原先在本段，现移至
+        # 「计算设置」段 —— 它是逐时仿真的数值校验参数（V2 §19），属全局计算选项，
+        # 而本段只放时序仿真的开关类字段。
     ],
 )
 

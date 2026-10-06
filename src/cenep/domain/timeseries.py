@@ -445,3 +445,12 @@ class TimeSeriesConfig(_Model):
     balance_tolerance: float = Field(
         default=1e-6, gt=0.0, description="能量平衡容差 kWh（V2 §19：超限判定计算失败）"
     )
+
+    optimization_enabled: bool = Field(
+        default=False,
+        description=(
+            "是否在计算时执行方案寻优（V2 §45–§48）。**默认关闭**：寻优要逐个候选跑"
+            "时序仿真并对最优候选做完整运营期精确复核（V2 §86），耗时远高于常规计算，"
+            "因此只有用户显式开启时才执行（方案比较不受该开关影响，始终执行）。"
+        ),
+    )

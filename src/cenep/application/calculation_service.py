@@ -17,12 +17,14 @@ import copy
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..calculation.engine import CalculationEngine, calculation_engine
 from ..calculation.errors import CalculationError
 from ..domain.enums import DispatchStrategy, ProjectType
 from ..domain.models import Project
 from ..domain.results import CalculationResult
+from ..domain.timeseries_results import ScenarioResult
 from ..infrastructure.logging_setup import get_logger
 from .project_service import ProjectService
 
@@ -30,6 +32,15 @@ logger = get_logger()
 
 #: 归一化说明的固定措辞（用户提示、报表与测试据此检索，不得随意改动）
 ALIGNMENT_NOTE_KEYWORD = "项目类型已按容量自动判定"
+
+#: 「当前方案」在方案比较中的固定编号与标签（V2 §105 口径一致性核对用，不得随意改动）
+CURRENT_SCENARIO_NAME = "CURRENT"
+CURRENT_SCENARIO_LABEL = "当前方案（项目配置，精确口径）"
+
+#: 方案比较未执行时的中文说明关键词（用户提示与测试据此检索，不得随意改动）
+SCENARIO_SKIPPED_KEYWORD = "方案比较未执行"
+#: 方案寻优未执行时的中文说明关键词（用户提示与测试据此检索，不得随意改动）
+OPTIMIZATION_SKIPPED_KEYWORD = "方案寻优未执行"
 
 
 @dataclass(frozen=True)
@@ -106,6 +117,16 @@ def align_project_type(project: Project) -> ProjectTypeAlignment:
     * 光伏 = 0 且 储能 > 0 → ``COMMERCIAL_STORAGE``
     * 两者都为 0 → 保留原类型（无对应类型，属 §42 基准方案）
 
+    归一化的依据是**用户实际配置的容量**，取"逐时仿真实际使用的容量"口径：
+
+    * 光伏容量：``scenario_engine.effective_pv_capacity``
+      （``timeseries.pv.capacity_kwp`` → ``pv.pv_capacity_kwp`` → 0）；
+    * 储能容量：``storage.storage_energy_kwh``（时序与年度模型都用它）。
+
+    说明：光伏口径**不含** V1 §19 的"按屋顶面积换算"。若只填了屋顶面积，
+    两侧口径会撕裂，此时按逐时仿真口径判定并给出中文告警（``warning``），
+    而不是静默按任一侧出结果。
+
     调用约束
     --------
     只允许在 ``project.timeseries.enabled`` 为真时调用；V1 路径必须原样交给
@@ -153,7 +174,16 @@ def align_project_type(project: Project) -> ProjectTypeAlignment:
         if aligned_type is not original_type
         else None
     )
-    warning = None if has_storage else _storage_missing_warning(clone, aligned_type)
+
+    warnings: list[str] = []
+    if not has_storage:
+        storage_warning = _storage_missing_warning(clone, aligned_type)
+        if storage_warning:
+            warnings.append(storage_warning)
+    pv_warning = _pv_capacity_gap_warning(clone, pv_capacity, aligned_type)
+    if pv_warning:
+        warnings.append(pv_warning)
+    warning = "\n".join(warnings) if warnings else None
 
     if note is not None:
         logger.info(
@@ -163,8 +193,8 @@ def align_project_type(project: Project) -> ProjectTypeAlignment:
             pv_capacity,
             storage_energy,
         )
-    if warning is not None:
-        logger.warning("储能容量为 0 但配置要求储能：%s", warning)
+    for item in warnings:
+        logger.warning("口径告警：%s", item)
 
     return ProjectTypeAlignment(
         project=clone,
@@ -242,6 +272,38 @@ def _storage_expectation_reason(project: Project) -> str:
     if strategy in (DispatchStrategy.PEAK_VALLEY, DispatchStrategy.ECONOMIC_OPTIMIZATION):
         reasons.append(f"储能调度策略为「{strategy.label}」（以充放电为前提）")
     return "；".join(reasons)
+
+
+def _pv_capacity_gap_warning(
+    project: Project, pv_capacity_kwp: float, aligned_type: ProjectType
+) -> str | None:
+    """「V1 §19 能解析出光伏、时序口径却解析为 0」时的中文告警（V2 §105）。
+
+    逐时时序仿真的光伏容量口径为 ``timeseries.pv.capacity_kwp → pv.pv_capacity_kwp → 0``
+    （与 ``scenario_engine.effective_pv_capacity`` 一致），**不含**按屋顶面积换算；
+    而年度模型（V1 §19）在未直接输入容量时会按屋顶面积换算。若用户只填了屋顶面积，
+    两侧口径就会撕裂。归一口径按时序侧判定（这是"实际参与仿真的容量"），但必须
+    明确提示用户补填显式容量，**不得静默**按任一侧出结果。
+
+    :returns: 中文告警；两侧口径一致（或都不含光伏）时为 ``None``。
+    """
+    from ..calculation.scenario_engine import resolved_pv_capacity
+
+    if pv_capacity_kwp > 0.0:
+        return None
+    by_area = resolved_pv_capacity(project)
+    if by_area <= 0.0:
+        return None
+    return (
+        f"光伏容量口径不一致：按 V1 §19 的屋顶面积口径可解析出 {by_area:g} kWp"
+        f"（可利用屋顶面积 {float(project.pv.usable_roof_area_m2):g} m² ÷ "
+        f"单位容量占用面积 {float(project.pv.area_per_kwp):g} m²/kWp），"
+        "但逐时时序仿真的光伏容量口径（timeseries.pv.capacity_kwp → "
+        "pv.pv_capacity_kwp → 0）解析为 0，逐时结果不含光伏电量与收益。"
+        f"本次按「{aligned_type.label}」（{aligned_type.value}）计算；"
+        "如项目确有光伏，请显式填写 pv.pv_capacity_kwp 或 "
+        "timeseries.pv.capacity_kwp 后重新计算（V2 §105 结果一致性）。"
+    )
 
 
 class CalculationService:
@@ -327,6 +389,19 @@ class CalculationService:
                     result.notes.append(alignment.warning)
             if simulation is not None:
                 self._attach_timeseries(result, calculation_project, simulation)
+                # V2 §43–§48：方案比较（默认执行）与方案寻优（需项目显式开启）
+                # 一并写入唯一结果对象，供 GUI「方案比较」图与 Excel
+                # 「方案比较」「方案寻优」两张表消费（V2 §62、§105、§109）。
+                try:
+                    self._attach_advanced_analysis(result, calculation_project, simulation)
+                except Exception:  # noqa: BLE001 - 附加分析不得拖垮主计算（V2 §86）
+                    logger.warning(
+                        "方案比较与寻优装配失败，已跳过（V2 §43–§48）", exc_info=True
+                    )
+                    result.notes.append(
+                        f"{SCENARIO_SKIPPED_KEYWORD}：装配过程出现未预期错误，已跳过；"
+                        "主计算结果不受影响（V2 §43–§48、§86）。"
+                    )
         except CalculationError as exc:
             logger.warning("计算失败：%s", exc)
             raise
@@ -419,6 +494,156 @@ class CalculationService:
                 "数据质量评分不适用：本项目曲线由典型日/等效小时生成，"
                 "而非导入实测 8760 数据；导入实测数据后会自动给出质量评分（规范 §55）。"
             )
+
+    # ------------------------------------------------------------------ #
+    # V2 方案比较与寻优装配（V2 §43–§48、§62、§105）
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _attach_advanced_analysis(
+        result: CalculationResult, project: Project, simulation: object
+    ) -> None:
+        """把方案比较与寻优结果写入唯一结果对象（V2 §43–§48、§62）。
+
+        默认行为由**项目配置**驱动（全部走正规字段，不使用 ``object.__setattr__``）：
+
+        * **方案比较**：项目启用时序仿真就执行（默认开启）。只评估
+          :func:`~cenep.calculation.scenario_engine.standard_variants` 的三种标准组合
+          （仅光伏 / 仅储能 / 光伏+储能），按 V2 §86 的**排名阶段**（首年 + 线性外推）
+          评估 —— 实测约 0.12 秒/组合，而完整运营期精确仿真是 2~3 秒/组合；
+          再前置一行「当前方案」，它直接取自本次唯一计算结果，**零额外计算**，
+          且 IRR / NPV / LCOE / LCOS 与 ``result`` 上的同名字段逐位一致（V2 §105）。
+          这样 GUI 的「方案比较」图（:class:`~cenep.ui.charts.ScenarioBarChart`）
+          与 Excel 的「方案比较」表不再显示"未执行"。
+        * **方案寻优**：默认**不执行**（开销大：逐候选时序仿真 + 最优候选完整运营期
+          精确复核，实测约 3 秒），仅当项目显式开启
+          ``project.timeseries.optimization_enabled`` 时才执行。
+
+        每一步都自带 ``try / except``：任何失败只记录 ``logger.warning`` 并向
+        ``result.notes`` 追加中文说明后跳过，绝不抛出（V2 §86：附加分析不得拖垮主计算）。
+        """
+        CalculationService._run_scenario_comparison(result, project, simulation)
+        CalculationService._run_optimization_if_enabled(result, project)
+
+    @staticmethod
+    def _run_scenario_comparison(
+        result: CalculationResult, project: Project, simulation: object
+    ) -> None:
+        """执行方案比较并写入 ``result.scenario_results``（V2 §43、§44、§105）。"""
+        # V2 模块延迟导入：未启用时序的项目（V1）不加载 V2 代码（V2 §1.1）。
+        try:
+            from ..calculation import scenario_engine as se
+        except Exception as exc:  # noqa: BLE001 - V2 模块不可用时主计算仍须返回
+            logger.warning("V2 方案模块加载失败，方案比较已跳过：%s", exc)
+            result.notes.append(
+                f"{SCENARIO_SKIPPED_KEYWORD}：V2 方案模块"
+                f"（cenep.calculation.scenario_engine）加载失败（{exc}），已跳过方案比较"
+                "与方案寻优；主计算结果不受影响（V2 §43–§48）。"
+            )
+            return
+
+        skipped: list[str] = []
+        scenarios: list[ScenarioResult] = []
+        try:
+            # §43 三种标准组合：仅光伏 / 仅储能 / 光伏 + 储能。
+            # 两侧容量同时为 0 的组合就是 §42 基准方案（没有可投资对象，V1 引擎会
+            # 拒绝计算），因此不进入"可投资方案"比较，只作为说明记录下来。
+            variants: list[tuple[str, dict[str, Any]]] = []
+            for label, changes in se.standard_variants(project):
+                variant = se.apply_variant(project, changes)
+                if (
+                    se.effective_pv_capacity(variant) <= 0.0
+                    and float(variant.storage.storage_energy_kwh) <= 0.0
+                ):
+                    skipped.append(label)
+                    continue
+                variants.append((label, changes))
+            # full_period=False = V2 §86 排名阶段（首年仿真 + 线性外推），仅用于排序；
+            # 「当前方案」一行才是精确口径（见下），避免每次计算都跑 3 遍完整运营期仿真。
+            scenarios = se.compare_scenarios(project, variants, full_period=False)
+        except Exception as exc:  # noqa: BLE001 - 方案比较失败不得影响主计算
+            logger.warning(
+                "方案比较执行失败，已跳过（V2 §43、§44；主计算结果不受影响）：%s", exc
+            )
+            result.notes.append(
+                f"{SCENARIO_SKIPPED_KEYWORD}：执行过程中出现错误（{exc}），"
+                "已跳过方案比较并继续输出主计算结果（V2 §43–§48、§86）。"
+            )
+            return
+
+        # 「当前方案」直接取自本次唯一计算结果（不重新计算）：project_irr / project_npv /
+        # lcoe / lcos 等与 result 上的同名字段逐位一致，满足 V2 §105 结果一致性。
+        first = simulation.first_year  # type: ignore[attr-defined]
+        current = se.build_scenario_result(
+            project,
+            result,
+            first.metrics,
+            label=CURRENT_SCENARIO_LABEL,
+            name=CURRENT_SCENARIO_NAME,
+        )
+        result.scenario_results = [current, *scenarios]
+        compared = "、".join(item.label for item in scenarios) or "（无）"
+        result.notes.append(
+            f"方案比较已执行（V2 §43、§44）：共 {len(result.scenario_results)} 个方案 —— "
+            f"「{CURRENT_SCENARIO_LABEL}」即本次项目配置（口径与主结果逐位一致，V2 §105），"
+            f"另含 {len(scenarios)} 个标准组合（{compared}）。"
+            + (
+                f" 未参与比较：{'、'.join(skipped)}"
+                "（光伏与储能容量同时为 0，属 §42 基准方案、没有可投资对象）。"
+                if skipped
+                else ""
+            )
+        )
+        result.notes.append(
+            "方案比较口径说明（V2 §86、§105）：标准组合的 IRR / NPV / 回收期 / LCOE / LCOS "
+            "为**排名近似值**——每个组合只跑首年逐时仿真，再用线性外推"
+            "（负荷类 (1+g_load)^(n-1)、光伏类 (1-d_pv)^(n-1)、储能类 (1-d_es)^(n-1)、"
+            "电价类 (1+g_tariff)^(n-1)）构造全周期收益，只用于横向排序，不得作为最终结论；"
+            f"「{CURRENT_SCENARIO_LABEL}」一行直接取自本次唯一计算结果，其 "
+            "project_irr / project_npv / lcoe / lcos 与主结果逐位一致（精确口径）。"
+        )
+
+    @staticmethod
+    def _run_optimization_if_enabled(result: CalculationResult, project: Project) -> None:
+        """按项目配置决定是否执行方案寻优并写入结果（V2 §45–§48）。
+
+        开关为 :attr:`cenep.domain.timeseries.TimeSeriesConfig.optimization_enabled`
+        （默认 ``False``，**不**擅自开启）：寻优要逐候选跑时序仿真并对最优候选做完整
+        运营期精确复核，开销远大于常规计算，必须由用户在
+        「参数 → 时序仿真总开关」中显式打开（V2 §86）。
+        """
+        if not bool(project.timeseries.optimization_enabled):
+            result.notes.append(
+                f"{OPTIMIZATION_SKIPPED_KEYWORD}：项目未开启方案寻优。开启方式：勾选"
+                "「参数 → 时序仿真总开关 → 启用方案寻优」（配置项 "
+                "timeseries.optimization_enabled = true）后重新计算。默认关闭的原因："
+                "寻优要逐个候选跑时序仿真、并对最优候选做完整运营期的精确复核，"
+                "耗时远高于常规计算（V2 §45–§48、§86）。"
+            )
+            return
+
+        try:
+            # 延迟导入：V1（未启用时序）路径不加载优化器（V2 §1.1）。
+            from ..optimization import optimize
+
+            optimization = optimize(project, optimizer="rule_based")
+        except Exception as exc:  # noqa: BLE001 - 寻优失败不得影响主计算
+            logger.warning("方案寻优执行失败，已跳过（V2 §45–§48）：%s", exc)
+            result.notes.append(
+                f"{OPTIMIZATION_SKIPPED_KEYWORD}：执行过程中出现错误（{exc}），"
+                "已跳过方案寻优并继续输出主计算结果（V2 §45–§48）。"
+            )
+            return
+
+        result.optimization_results = optimization
+        result.notes.append(
+            "方案寻优已执行（V2 §45–§48、§86）：优化器「规则型」（在规则建议点附近做"
+            f"小规模网格扫描），目标为「{optimization.objective.label}」，共 "
+            f"{len(optimization.candidates)} 个候选，最优方案 "
+            f"{optimization.best_run_id}（耗时 {optimization.elapsed_seconds:.2f} 秒）。"
+            "排名用的是首年 + 线性外推的**近似**值，最优候选已做**精确复核**"
+            "（完整运营期时序仿真），逐条依据见 optimization_results.explanation"
+            "（V2 §48 禁止黑盒，两阶段评估见 V2 §86）。"
+        )
 
 
 def economic_v2_to_result_set(sim: object):

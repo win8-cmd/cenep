@@ -80,7 +80,7 @@ class TestAlignmentCore:
         修复前：``storage_energy_kwh == 0.0``、``storage_power_kw == 0.0``、
         ``capex_breakdown["储能投资"] == 0``（但时序仿真用了 1000 kWh）。
         """
-        implicit = _service().calculate(_forgotten_type())  
+        implicit = _service().calculate(_forgotten_type())
         explicit = _service().calculate(_explicit_pv_storage())
 
         assert implicit.storage_energy_kwh == GOLDEN_STORAGE_KWH
@@ -98,7 +98,7 @@ class TestAlignmentCore:
 
     def test_irr_npv_payback_identical_to_explicit_pv_storage(self):
         """IRR / NPV / 回收期必须与显式 PV_STORAGE **逐位一致**（回归主断言）。"""
-        a = _service().calculate(_forgotten_type())  
+        a = _service().calculate(_forgotten_type())
         b = _service().calculate(_explicit_pv_storage())
 
         assert a.project_irr == b.project_irr
@@ -121,7 +121,7 @@ class TestAlignmentCore:
         legacy = calculation_engine.calculate(
             copy.deepcopy(project), year_override=simulation.overrides()
         )
-        fixed = _service().calculate(project)  
+        fixed = _service().calculate(project)
 
         # 旧接线：用了储能收益、却没有储能造价
         assert legacy.storage_energy_kwh == 0.0
@@ -154,7 +154,7 @@ class TestAlignmentCore:
     def test_align_project_type_returns_copy_and_metadata(self):
         """``align_project_type`` 的返回值语义（副本 + 依据 + 说明）。"""
         project = _forgotten_type()
-        alignment = align_project_type(project)  
+        alignment = align_project_type(project)
 
         assert alignment.project is not project
         assert project.basic_info.project_type is ProjectType.COMMERCIAL_PV
@@ -211,7 +211,7 @@ class TestDegenerateAlignments:
 class TestNotes:
     def test_alignment_note_explains_target_and_basis(self):
         """归一化必须写入中文说明：判定结果 + 依据（哪些容量非零）+ 原类型。"""
-        result = _service().calculate(_forgotten_type())  
+        result = _service().calculate(_forgotten_type())
         hits = [note for note in result.notes if ALIGNMENT_NOTE_KEYWORD in note]
         assert len(hits) == 1
         note = hits[0]
@@ -241,6 +241,31 @@ class TestNotes:
         result = _service().calculate(project)
         assert not any("储能容量为 0" in note for note in result.notes)
 
+    def test_roof_area_pv_caliber_gap_warns_in_chinese(self):
+        """只填屋顶面积时：V1 口径能算出光伏、时序口径为 0 → 必须告警，不得静默。
+
+        逐时仿真的光伏容量口径是 ``timeseries.pv.capacity_kwp → pv.pv_capacity_kwp → 0``，
+        不含"按屋顶面积换算"（V1 §19 有该回退）。两侧口径撕裂时必须提示用户补填显式容量。
+        """
+        project = build_project(storage_kw=0.0, storage_kwh=0.0)
+        project.basic_info.project_type = ProjectType.COMMERCIAL_PV
+        project.pv.pv_capacity_kwp = None  # 只给屋顶面积
+        project.pv.usable_roof_area_m2 = 6500.0
+        project.pv.area_per_kwp = 6.0
+        project.timeseries.pv.capacity_kwp = None
+        project.timeseries.dispatch.strategy = DispatchStrategy.PV_SELF_CONSUMPTION
+
+        result = _service().calculate(project)
+
+        warnings = [note for note in result.notes if "光伏容量口径不一致" in note]
+        assert warnings, "屋顶面积口径与时序口径撕裂时必须给出告警说明"
+        assert "1083.33" in warnings[0]  # 6500 ÷ 6 = 1083.33 kWp（V1 §19 口径）
+        # 口径撕裂的后果：年度模型仍按 V1 §19 计入屋顶面积对应的光伏容量与造价，
+        # 但逐时口径为 0 → 首年发电量为 0（偏保守：只计光伏造价、不计光伏收益），
+        # 因此必须告警提示用户补填显式容量，而不是让用户拿到一个莫名亏损的结果。
+        assert result.pv_capacity_kwp == pytest.approx(6500.0 / 6.0, rel=1e-9)
+        assert result.first_year_generation == 0.0
+
 
 # --------------------------------------------------------------------------- #
 # ④ 反向保护：内部不一致必须显式失败（不得静默继续）
@@ -260,7 +285,7 @@ class TestReverseProtection:
         )
 
         with pytest.raises(CalculationError) as excinfo:
-            _service().calculate(_forgotten_type())  
+            _service().calculate(_forgotten_type())
 
         message = str(excinfo.value)
         assert "储能" in message
@@ -278,7 +303,7 @@ class TestReverseProtection:
             lambda project: ProjectType.COMMERCIAL_PV,
         )
         with pytest.raises(CalculationError) as excinfo:
-            _service().calculate(_forgotten_type())  
+            _service().calculate(_forgotten_type())
         assert "未预期错误" not in str(excinfo.value)
 
 
@@ -291,7 +316,7 @@ class TestV1Untouched:
         project = _forgotten_type()
         project.timeseries.enabled = False
 
-        result = _service().calculate(project)  
+        result = _service().calculate(project)
 
         assert result.project_type == ProjectType.COMMERCIAL_PV.value
         assert result.storage_energy_kwh == 0.0  # V1 口径：该类型不含储能
@@ -321,7 +346,7 @@ class TestV1Untouched:
         project.timeseries.enabled = False
 
         direct = calculation_engine.calculate(copy.deepcopy(project))
-        via_service = _service().calculate(project)  
+        via_service = _service().calculate(project)
 
         assert direct.project_irr == via_service.project_irr
         assert direct.project_npv == via_service.project_npv
