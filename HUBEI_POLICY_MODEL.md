@@ -125,7 +125,7 @@
 
 | 序号 | 要素 | 必须支持的内容 | 对应 `PolicyProfile` 字段 | 对应 `TariffConfig` 字段 | 当前状态 |
 |---|---|---|---|---|---|
-| 1 | **市场化交易** | 上网电量进入电力市场、由市场形成价格；需记录市场电价的来源与口径 | `market_price`、`pricing_mechanism` | `tariff_mode = MARKET`、`market_price` | 字段已实现；湖北模板 Phase 8 未实现 |
+| 1 | **市场化交易** | 上网电量进入电力市场、由市场形成价格；需记录市场电价的来源与口径 | `market_price`、`pricing_mechanism` | `tariff_mode = MARKET`、`market_price` | 字段与模型已实现；湖北模板为**占位模板**（数值字段全为 `None`，按 §89/§159 刻意不预填，待用户/官方数据填入） |
 | 2 | **分时电价** | 峰/平/谷电价与电量比例；峰平谷比例之和必须为 1 | — （分时电价属电价参数，不属于政策 Profile） | `peak_price`、`flat_price`、`valley_price`、`peak_ratio`、`flat_ratio`、`valley_ratio` | 字段与校验已实现 |
 | 3 | **新能源市场化交易** | 新能源（光伏/风电）参与市场化交易的电量、电价机制 | `pricing_mechanism`、`market_price` | `tariff_mode`、`market_price` | 字段已实现 |
 | 4 | **绿电价格** | 绿色电力交易价格 | `green_energy_price` | `green_energy_price` | 字段已实现 |

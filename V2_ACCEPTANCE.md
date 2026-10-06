@@ -108,7 +108,7 @@
 | spec 变更 | `hiddenimports` 追加 `pyqtgraph` 与 `scipy`（`scipy.optimize._linprog_highs` / `_highspy._core` / `_highspy._highs_wrapper` / `scipy.sparse._csc`），防止打包后 LP 寻优**静默降级** |
 | 启动验证 ①：自检 | `.NET ProcessStartInfo`（`UseShellExecute=$false` + 重定向 stdout/stderr）启动 `CENEP.exe --selftest <报告>` → **退出码 0**、耗时 **4.54 s**、报告 `{"ok": true, "stage": "done", "errors": []}`；三个黄金项目各导出 **24 张工作表** Excel + PDF（214 KB ±） |
 | 启动验证 ②：GUI | 无参数启动（`QT_QPA_PLATFORM=offscreen`）→ 进程**存活并进入 Qt 事件循环**（工作集 139.4 MB，即已完成 PySide6 + PyQtGraph 加载），stderr **无任何 traceback**；正常启动日志「启动 CENEP V1 / 加载政策模板 / 新建项目」齐全 |
-| 已知遗留 | 界面标题常量 `ui/app.py::APP_NAME` 仍为 `"CENEP V1"`（**属 `src/` 代码，本次收尾按硬性要求未改**）；建议后续版本改为 `"CENEP V2"` |
+| 已知遗留（未改 `src/`，按收尾硬性要求） | ① 界面标题常量 `src/cenep/ui/app.py::APP_NAME` 仍为 `"CENEP V1"`；② `src/cenep/__init__.py::__version__` 与 `pyproject.toml` 的 `version` 仍为 `"1.0.0"`，因此 `.nep` 信封的 `app_version` 仍写 `1.0.0`（**V2 的版本口径由信封新增的 `calculation_version = "2.0.0"` 与 EXE 版本资源承担**）。二者均属 `src/` 或打包声明文件，建议下一版统一改为 V2 |
 
 > 验证命令（GUI 子系统 EXE 用 `&` 不会等待，必须用 `Start-Process -PassThru` 或
 > `.NET ProcessStartInfo` 才能拿到退出码与启动期错误）：
@@ -116,7 +116,7 @@
 > ```powershell
 > $psi = New-Object System.Diagnostics.ProcessStartInfo
 > $psi.FileName = "$WS\dist\CENEP\CENEP.exe"
-> $psi.Arguments = "--selftest `"$WS\build\packaged_selftest_v2.json`""
+> $psi.Arguments = "--selftest `"$WS\build\packaged_selftest.json`""
 > $psi.WorkingDirectory = "$WS\dist\CENEP"
 > $psi.UseShellExecute = $false
 > $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true

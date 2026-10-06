@@ -1,10 +1,11 @@
 # STORAGE_DISPATCH.md —— 储能 SOC 模型与调度策略
 
-> **当前状态**：**V2 开发中**。截至本文档修订时，**配置模型已落地**：
-> `domain/timeseries.py:StorageDispatchConfig`（15 字段）已存在，本文档第 4、8 节涉及的
-> 阈值与开关字段均**逐字段对照源码核实**。算法模块 `src/cenep/calculation/storage_soc.py`、
-> `src/cenep/calculation/dispatch_engine.py` **尚未创建**，其算法部分为**设计**。
-> 全文一律使用「设计」「本期实现」表述，**不得**据此认为功能已可用。
+> **当前状态**：**已交付（V2.0.0）**。配置模型与算法模块**均已落地**：
+> `domain/timeseries.py:StorageDispatchConfig`（15 字段）与
+> `calculation/storage_soc.py`、`calculation/dispatch_engine.py` **均已创建并通过测试**
+> （`tests/test_storage_soc.py` 32 项、`tests/test_dispatch_engine.py` 43 项、
+> `tests/test_dispatch_semantics.py` 19 项）。本文档第 4、8 节字段与算法
+> **逐字段/逐判定对照源码核实**；「设计」现读作"**规范设计要求，已按此实现**"。
 >
 > **优先级**：受 [CORE_PARAMETERS_AND_FORMULAS.md](CORE_PARAMETERS_AND_FORMULAS.md) 约束；
 > 储能 SOC 与调度的字段定义以 [TIMESERIES_MODEL.md](TIMESERIES_MODEL.md) 第 4、5 节为准，
@@ -12,7 +13,7 @@
 >
 > **记号**：`V2 §N` = V2 总规范第 N 条；`V1 §N` = V1 产品规范第 N 条；
 > `核心 §N` / `核心 LN` = `CORE_PARAMETERS_AND_FORMULAS.md` 第 N 节 / 第 N 条限制；
-> 【设计】= 本期尚未实现；【V1 沿用】= V1 已有实现，V2 直接复用。
+> 【设计】= 规范设计要求（**已实现**）；【V1 沿用】= V1 已有实现，V2 直接复用。
 >
 > **适用范围**：工商业储能与光储一体化项目的**逐时**储能建模（V2 §10）。
 > V1 的**年度等效循环模型**（核心 §4.2、L11）继续保留，作为时序模型不可用时的回退路径。

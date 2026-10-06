@@ -1,18 +1,20 @@
 # TIMESERIES_MODEL.md —— 时序数据模型与结果字典
 
-> **当前状态**：**V2 开发中**。截至本文档修订时，**域层已落地**：
+> **当前状态**：**已交付（V2.0.0）**。域层与计算层**全部落地**：
 > `src/cenep/domain/timeseries.py`（输入时序模型）、`src/cenep/domain/timeseries_results.py`
-> （结果模型）**已存在**，`domain/enums.py` 已含 `Resolution` / `DispatchStrategy` / `DispatchAction`。
-> `data/`、`calculation/`（V2 部分）与 `optimization/` 下的模块**尚未创建**。
-> 本文档描述**设计**：已有代码的部分以**实际实现**为准（第 4、6、7 节字段表逐字段对照源码核实），
-> 尚无代码的部分用「设计」「V2 计划」表述，**不得**据此认为功能已可用。
+> （结果模型）、`domain/enums.py` 的 10 个 V2 枚举，以及 `calculation/` 下的 9 个 V2 模块
+> （`timeseries_engine` / `load_profile` / `pv_profile` / `tariff_series` / `storage_soc` /
+> `dispatch_engine` / `energy_balance` / `economic_v2` / `scenario_engine`）、
+> `data/`（importer / validator / quality）与 `optimization/`（rule_based / greedy / lp）
+> **均已创建并通过测试**（V2 相关用例见 [TEST_PLAN.md](TEST_PLAN.md) 第 8 节）。
+> 本文档的字段表均**逐字段对照源码核实**；「设计」现读作"**规范设计要求，已按此实现**"。
 >
 > **优先级**：受 [CORE_PARAMETERS_AND_FORMULAS.md](CORE_PARAMETERS_AND_FORMULAS.md)（V1 最高优先级）约束；
 > V2 新增内容以本文档为准。与 V1 冲突时，**V1 既有口径不得被静默改变**（V2 §65）。
 >
 > **记号**：`V2 §N` = V2 总规范第 N 条；`V1 §N` = V1 产品规范第 N 条；
 > `核心 §N` = `CORE_PARAMETERS_AND_FORMULAS.md` 第 N 节；
-> `文件:符号` = 源码位置（V2 模块尚未存在）；【设计】= 本期尚未实现；【V1 沿用】= V1 已有实现，V2 直接复用。
+> `文件:符号` = 源码位置（V2 模块**均已存在**）；【设计】= 规范设计要求（**已实现**）；【V1 沿用】= V1 已有实现，V2 直接复用。
 >
 > **适用范围**：工商业分布式光伏 / 工商业储能 / 工商业光储三类项目（V2 §8）。
 > V2 在 V1 年度模型之外新增**逐小时时序模型**，V1 年度模型继续保留并作为基准对照。

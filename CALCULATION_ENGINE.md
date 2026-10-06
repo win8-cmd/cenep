@@ -18,9 +18,9 @@
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Presentation 层（已实现）                                                │
 │  GUI(PySide6)  ── src/cenep/ui/（app / main_window / pages / sections /   │
-│                   field_spec；只绑定字段与展示结果，无任何公式）           │
-│  Excel 报表     ── src/cenep/reports/excel_exporter.py（13 张工作表）      │
-│  PDF 报表       ── src/cenep/reports/pdf_exporter.py（15 章 + 免责声明）   │
+│                   field_spec / V2 charts；只绑定字段与展示结果，无公式）   │
+│  Excel 报表     ── src/cenep/reports/excel_exporter.py（V2：24 张工作表）  │
+│  PDF 报表       ── src/cenep/reports/pdf_exporter.py（V2：16 部分+免责声明）│
 └───────────────────────────────┬──────────────────────────────────────────┘
                                 │ ① 只调用应用服务，绝不自己算
                                 ▼
@@ -200,7 +200,7 @@ except Exception as exc:                      # 兜底：避免 GUI 崩在未预
 > **诚实声明**：规范 §82 的条款正文本身**不在本仓库中**（仓库根目录只有
 > `README.md`、`PROJECT_SPEC.md`、`UI_SPEC.md`、`REPORT_SPEC.md`、
 > `REGULATIONS_AND_POLICY.md`、`HUBEI_POLICY_MODEL.md`、`ROADMAP.md`、
-> `AI_EXECUTION_GUIDE.md` 与本次交付的 4 份文档，`TEST_PLAN.md` 尚未创建）。
+> `AI_EXECUTION_GUIDE.md`、`TEST_PLAN.md` 与 V2 的 4 份设计文档）。
 > 因此下表中"步骤名"来自代码注释，属于对 §82 的实现映射，
 > 而非对 §82 原文的逐字复述。
 
@@ -747,7 +747,7 @@ Excel 导出（`reports/excel_exporter.py`）已经落实"不重算 + 可追溯"
 | `tests/test_project_file.py` | `.nep` 往返、信封、原子写、版本校验、SQLite |
 | `tests/test_application.py` | 应用服务、自动保存、异常翻译、性能、日志 |
 | `tests/test_excel_export.py` | 13 张表、数值一致性、无公式、着色、三种项目类型 |
-| `tests/test_pdf_export.py` | 15 章结构、免责声明逐字出现、数值一致 |
+| `tests/test_pdf_export.py` | PDF 结构（**V2：16 部分**）、免责声明逐字出现、数值一致 |
 | `tests/test_gui.py` | 界面只绑定字段、不出现公式、结果展示 |
 | `tests/test_policy.py` | 政策模板完整性、拒绝未填完转换、版本只新增 |
 | `tests/test_selftest.py` | `python -m cenep --selftest` 自检流程（计算 + Excel + PDF） |

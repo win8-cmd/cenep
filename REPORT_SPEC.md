@@ -267,7 +267,7 @@ V2 §67 要求「至少包含」若干类内容，因此工作表在 V1 §108 �
 | 14 | 资本金现金流（元） | `equity_cashflow` | 元 | `#,##0.00` |
 | 15 | 累计项目现金流（元） | `cumulative_project_cashflow` | 元 | `#,##0.00` |
 
-**建议扩展列（Phase 6 增强，当前未实现）**
+**建议扩展列（Phase 6 增强，**仍未实现**；V2 也未加入 —— 年度现金流表保持 V1 的 15 列）**
 
 | 建议列 | 数据来源 | 说明 |
 |---|---|---|
@@ -709,12 +709,12 @@ PDFExporter.export(project, result, path)
 
 | 校验 | 内容 | 当前状态 |
 |---|---|---|
-| Excel ↔ `CalculationResult` | 「年度现金流」每行 = `annual_results[i]`；「财务指标」每行 = 对应字段 | ✅ 已实现测试，⬜ 待全绿 |
-| PDF ↔ `CalculationResult` | 第 10 章指标 = 对应字段；文本提取后比对 | ✅ 已实现（快照进行中） |
-| Excel ↔ PDF | 同一指标数值一致（格式化归一化后） | ✅ 已实现（快照进行中） |
-| GUI ↔ Excel ↔ PDF | 三层互等 | ⬜ 未实现（GUI 一层尚未实现；Excel 与 PDF 两层已具备） |
+| Excel ↔ `CalculationResult` | 「年度现金流」每行 = `annual_results[i]`；「财务指标」每行 = 对应字段 | ✅ 已实现且测试全绿（`test_excel_export.py` 19 项） |
+| PDF ↔ `CalculationResult` | 指标部分 = 对应字段；文本提取后比对 | ✅ 已实现且测试全绿（`test_pdf_export.py` 19 项） |
+| Excel ↔ PDF | 同一指标数值一致（格式化归一化后） | ✅ 已实现且测试全绿（`test_report_v2.py` 41 项） |
+| GUI ↔ Excel ↔ PDF | 三层互等 | ⚠️ **间接覆盖**：`test_gui.py` / `test_gui_v2.py` 断言"界面显示值 = `CalculationResult`"，`test_report_v2.py::test_both_excel_and_pdf_expose_v2_indicators` 断言"Excel 与 PDF 同时含 V2 指标"，二者合起来等价于三层同源；**尚无单一的三层互等用例** |
 | 禁止 Excel 公式 | 单元格只写数值；公式仅以文本展示 | ✅ 已按此实现 |
-| 禁止导出前重算 | 参数变更后必须重新计算再导出 | ⬜ 待 Phase 5/6 在界面上实现提示 |
+| 禁止导出前重算 | 参数变更后必须重新计算再导出 | ✅ 已实现：报表只消费传入的 `CalculationResult`，且 `test_excel_export.py::test_no_formulas_written` 断言工作簿内公式单元格数为 0 |
 
 ### 4.2 报告验收 checklist
 
@@ -723,15 +723,15 @@ PDFExporter.export(project, result, path)
 - [x] 年度现金流表包含 Year 0 行 —— ✅已实现
 - [x] 参数来源表按 `SourceType` 着色，假设值带"假设值；"前缀 —— ✅已实现
 - [x] 未关联政策时的提示文案 —— ✅已实现
-- [ ] Excel 全部测试通过（0 failed） —— ⬜待修复
+- [x] Excel 全部测试通过（**V2.0.0 全量 885 passed / 0 failed**） —— ✅已完成
 - [ ] 年度现金流表补齐建议列（电量分配、收入构成、利润表、债务、偿债） —— ⬜未实现
 - [x] PDF 16 部分齐备且部分名与 V2 §66 一致 —— ✅已实现
 - [x] PDF 封面要素完整（含政策版本与免责提示） —— ✅已实现（快照进行中）
 - [x] PDF 页眉页脚、页码、政策版本提示位 —— ✅已实现（快照进行中）
 - [x] PDF 第十六部分含 §111 免责声明原文（两段） —— ✅已实现
-- [ ] PDF 图表齐全（至少含累计现金流、IRR 敏感性、NPV 敏感性） —— ⬜待核实（当前 PDF 以表格为主）
-- [x] PDF ↔ `CalculationResult` 一致性测试（`tests/test_pdf_export.py`） —— ✅已实现（快照进行中），⬜ 待测试全绿
-- [ ] 三层互等测试（GUI = Excel = PDF） —— ⬜**未实现**（待 Phase 5 GUI）
+- [ ] PDF 图表齐全（**规范原列的三张：累计现金流、IRR 敏感性、NPV 敏感性**） —— ⬜**仍未实现**；V2 新增的 3 张图是**典型日负荷与光伏出力曲线、逐月上网电量柱状图、典型日储能 SOC 曲线**，与这三张不是同一组
+- [x] PDF ↔ `CalculationResult` 一致性测试（`tests/test_pdf_export.py`、`tests/test_report_v2.py`） —— ✅已实现且测试全绿
+- [~] 三层互等测试（GUI = Excel = PDF） —— ⚠️ **间接覆盖**（GUI↔结果 与 Excel/PDF↔结果 分别有断言），**尚无单一的三层互等用例**
 
 ---
 

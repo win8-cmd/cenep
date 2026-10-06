@@ -1,16 +1,17 @@
 # OPTIMIZATION.md —— 优化与方案／参数扫描
 
-> **当前状态**：**设计阶段（V2 尚未实现）**。本文档描述 CENEP V2 的三个优化器、
+> **当前状态**：**已交付（V2.0.0）**。本文档描述 CENEP V2 的三个优化器、
 > 方案扫描与参数扫描机制，对应模块 `src/cenep/optimization/rule_based.py`、
 > `greedy_optimizer.py`、`lp_optimizer.py` 与 `src/cenep/calculation/scenario_engine.py`
-> **尚未创建**。全文一律使用「设计」「本期实现」表述，**不得**据此认为功能已可用。
+> **均已创建并通过测试**（`tests/test_optimization.py` 30 项、`tests/test_scenario_engine.py` 45 项）。
+> 全文的「设计」「本期实现」现读作"**规范设计要求，已按此实现**"。
 >
 > **优先级**：受 [CORE_PARAMETERS_AND_FORMULAS.md](CORE_PARAMETERS_AND_FORMULAS.md) 约束；
 > 调度与 SOC 的算法细节以 [STORAGE_DISPATCH.md](STORAGE_DISPATCH.md) 为准，
 > 时序模型与字段以 [TIMESERIES_MODEL.md](TIMESERIES_MODEL.md) 为准。
 >
 > **记号**：`V2 §N` = V2 总规范第 N 条；`V1 §N` = V1 产品规范第 N 条；
-> 【设计】= 本期尚未实现；【V1 沿用】= V1 已有实现。
+> 【设计】= 规范设计要求（**已实现**）；【V1 沿用】= V1 已有实现。
 >
 > **适用范围**：工商业分布式光伏 / 工商业储能 / 工商业光储三类项目的
 > **容量配置寻优**与**敏感性/情景扩展扫描**（V2 §44）。

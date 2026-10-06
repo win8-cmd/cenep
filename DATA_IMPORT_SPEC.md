@@ -1,19 +1,19 @@
 # DATA_IMPORT_SPEC.md —— 时序数据导入规范
 
-> **当前状态**：**V2 开发中**。截至本文档修订时，**枚举与质量模型已落地**：
-> `domain/enums.py` 已含 `MissingDataPolicy`（4 取值）、`LoadProfileMode`、`PVProfileMode`；
-> `domain/timeseries_results.py` 已含 `DataQualityScore`（6 字段）与 `DataQualityIssue`（5 字段），
-> 本文档第 6、8 节已**逐字段对照源码核实**。
-> 导入与校验模块 `src/cenep/data/importer.py`、`validator.py`、`quality.py`
-> **尚未创建**，其流程与规则清单为**设计**。全文一律使用「设计」「本期实现」表述，
-> **不得**据此认为功能已可用。
+> **当前状态**：**已交付（V2.0.0）**。模型与算法模块**均已落地**：
+> `domain/enums.py` 的 `MissingDataPolicy`（4 取值）、`LoadProfileMode`、`PVProfileMode`；
+> `domain/timeseries_results.py` 的 `DataQualityScore`（6 字段）与 `DataQualityIssue`（5 字段）；
+> 以及 `src/cenep/data/importer.py`、`validator.py`、`quality.py`
+> **均已创建并通过测试**（`tests/test_data_layer.py` 107 项）。
+> 本文档第 6、8 节与规则清单**逐条对照源码核实**；
+> 「设计」现读作"**规范设计要求，已按此实现**"。
 >
 > **优先级**：受 [CORE_PARAMETERS_AND_FORMULAS.md](CORE_PARAMETERS_AND_FORMULAS.md) 约束；
 > 导入产出的模型字段定义以 [TIMESERIES_MODEL.md](TIMESERIES_MODEL.md) 第 4 节为准。
 >
 > **记号**：`V2 §N` = V2 总规范第 N 条；`V1 §N` = V1 产品规范第 N 条；
 > `核心 §N` / `核心 LN` = `CORE_PARAMETERS_AND_FORMULAS.md` 第 N 节 / 第 N 条限制；
-> 【设计】= 本期尚未实现；【V1 沿用】= V1 已有实现。
+> 【设计】= 规范设计要求（**已实现**）；【V1 沿用】= V1 已有实现。
 >
 > **适用范围**：工商业光伏/储能/光储项目的**逐时负荷、光伏出力、分时电价**三类时序数据导入
 > （V2 §51）。V1 的**年度参数**录入方式（GUI 表单）继续保留，不受本文档影响。

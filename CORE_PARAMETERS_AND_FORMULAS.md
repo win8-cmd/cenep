@@ -8,7 +8,10 @@
 >
 > 本文档中的字段名、默认值、取值区间、公式与源码位置**逐个对照源码核实**（`src/cenep/`），
 > 章节末附「公式—条款—源码」对照表。适用范围：**工商业分布式光伏 / 工商业储能 /
-> 工商业光储**三类项目（§13）；不做集中式电站、风电、水电，不做 8760 小时仿真、GIS、CAD。
+> 工商业光储**三类项目（§13）；不做集中式电站、风电、水电、GIS、CAD。
+**8760 小时时序仿真**在 V1 中不做，**V2.0.0 已提供**（`timeseries.enabled = True`，详见
+[TIMESERIES_MODEL.md](TIMESERIES_MODEL.md)）；本文档第 1–6 节的公式与口径均为
+**V1 年度模型**，V2 时序路径默认关闭且不改动本文档的任何 V1 公式。
 >
 > 记号：`§N` = 产品规范第 N 条；`文件:函数` = 源码位置；【登记】= 被计算引擎写入
 > `ParameterRegistry`（§83）；【保留】= 已建模但未参与 V1 计算；`TODO(V2)` = 待办（§158）。
@@ -426,6 +429,8 @@ storage_year_result(...) → StorageYear(year, available_energy_kwh,
 
 源码：`storage.py:storage_year_result`。引擎把当年 `Echg` 作为光伏分配的
 `storage_charge_headroom` 入参。V1 采用**年度等效循环模型**，不做 8760 小时仿真（§37）。
+> **V2 补充**：启用时序仿真（`timeseries.enabled = True`）后，储能改由逐时 SOC 模型驱动
+> （`calculation/storage_soc.py` + `dispatch_engine.py`），本节公式仍服务 V1 年度路径。
 
 ### 4.3 电价与收益（`revenue.py`，§26–§33、§43、§44）
 
@@ -703,17 +708,17 @@ LCOE/LCOS 成本不含融资利息（§76）；ROI 必须注明"生命周期累�
 
 | 编号 | 限制 | TODO |
 |---|---|---|
-| L11 | **年度等效循环模型**，不做 8760 小时仿真；不建模日内时序、SOC 曲线、需量管理 | `TODO(V2)`：8760 小时仿真 |
+| L11 | **年度等效循环模型**，不做 8760 小时仿真；不建模日内时序、SOC 曲线、需量管理 | ✅ **V2 已解决**：8760 时序仿真 + SOC 逐步递推 + 需量电费与削峰（`timeseries.enabled = True`）；V1 年度路径保留不变 |
 | L12 | 更换电芯当年容量**恢复至初始值**并重新衰减 | 口径已明确；"新电芯参数衰减"需显式建模 |
 | L13 | ~~`StorageConfig.storage_capex_per_kwh` 不参与 CAPEX~~ | **已修复**：删除 `StorageConfig` 中的同名字段，储能单位投资统一由 `InvestmentConfig.storage_capex_per_kwh` 承担（唯一数据源）；储能参数页的输入框改为绑定该字段 |
-| L14 | `grid_charge`（电网补充充电量）只用于展示与校验，不进入收益公式 | 口径已披露 |
+| L14 | `grid_charge`（电网补充充电量）只用于展示与校验，不进入收益公式 | 口径已披露；**V2 时序路径**中 `grid_to_storage` **计入** `electricity_cost` 与 `storage_revenue`（V2 唯一会改变储能收益数值的口径变化，迁移时在 `notes` 披露） |
 
 ### 6.4 负荷
 
 | 编号 | 限制 | TODO |
 |---|---|---|
-| L15 | 只用 `annual_load_kwh` 与 `annual_load_growth_rate`；`working_days`、昼/夜比例**不参与计算** | `TODO(V2)`：分时段负荷曲线 |
-| L16 | 负荷为几何增长，无分月/分季波动 | `TODO(V2)`：分月负荷模型 |
+| L15 | 只用 `annual_load_kwh` 与 `annual_load_growth_rate`；`working_days`、昼/夜比例**不参与计算** | ✅ **V2 已解决**：`calculation/load_profile.py` 支持逐时导入 / 典型日×月度系数 / 年度简化三模式 |
+| L16 | 负荷为几何增长，无分月/分季波动 | ✅ **V2 已解决**：`Resolution.MONTHLY` + 典型日×月度系数曲线，支持分月/分季波动形状 |
 
 ### 6.5 投资
 
@@ -745,21 +750,24 @@ LCOE/LCOS 成本不含融资利息（§76）；ROI 必须注明"生命周期累�
 | — | SQLite（政策版本 / 政策模板 / 项目模板 / 参数字典 / 历史索引） | ✅ 已实现 | `src/cenep/infrastructure/db.py` |
 | — | 日志（轮转文件 + 控制台） | ✅ 已实现 | `src/cenep/infrastructure/logging_setup.py` |
 | — | 政策模板与版本机制（**刻意不预填数值**） | ✅ 已实现 | `src/cenep/policy/` |
-| — | Excel 导出（13 张工作表） | ✅ 已实现 | `src/cenep/reports/excel_exporter.py` |
-| — | PDF 导出（15 章 + 免责声明） | ✅ 已实现 | `src/cenep/reports/pdf_exporter.py` |
-| — | GUI（PySide6，只绑定字段与展示结果） | ✅ 已实现 | `src/cenep/ui/` |
+| — | Excel 导出（**V2：24 张工作表**；V1 的 13 张全部保留） | ✅ 已实现 | `src/cenep/reports/excel_exporter.py` |
+| — | PDF 导出（**V2：16 部分** + 免责声明 + 3 张图表） | ✅ 已实现 | `src/cenep/reports/pdf_exporter.py` |
+| — | GUI（PySide6，只绑定字段与展示结果；**V2 另含时序页与 PyQtGraph 图表**） | ✅ 已实现 | `src/cenep/ui/` |
 | — | `python -m cenep` 入口与 `--selftest` 自检 | ✅ 已实现 | `src/cenep/__main__.py`、`selftest.py` |
-| — | PyInstaller 打包配置 | ✅ 已实现（配置） | `build/CENEP.spec`、`build/entry.py` |
+| — | PyInstaller 打包 | ✅ **已构建并实际启动验证** | `build/CENEP.spec`、`build/entry.py`、`build/version_info.txt` → `dist\CENEP\CENEP.exe`（**21,958,256 字节**，版本资源 2.0.0；`--selftest` 退出码 0） |
 | L23 | 示例项目与导出产物 | ✅ 已实现 | `examples/`、`tools/make_examples.py` |
 | L24 | `utils/` 通用工具包 | ❌ **尚未实现**（目录不存在） | — |
-| L25 | `TEST_PLAN.md`（黄金案例手工推导过程） | ❌ **尚未创建** | — |
-| L26 | `.nep` schema 迁移器 | ❌ 尚未实现（当前策略：版本不匹配即拒载） | `infrastructure/project_file.py` |
+| L25 | ~~`TEST_PLAN.md`（黄金案例手工推导过程）~~ | ✅ **已存在**（含 V2 测试清单，885 项 / 32 个文件） | — |
+| L26 | ~~`.nep` schema 迁移器~~ | ✅ **V2 已实现**：`1.0`/`1.1` → `2.0` 自动迁移（只补 `timeseries` 默认值 + 版本号 + `migration_notes`），未知版本仍拒载 | `infrastructure/migration.py` |
 | L27 | 政策数值自动折算为电价 | ❌ 尚未实现（见 L7） | — |
 | L28 | 多省份政策模板数据集 | ⚠️ 仅湖北占位模板 | `policy/hubei.py`（数值全为 `None`） |
 
-> **与早期项目概要的差异**：概要曾称"GUI、Excel/PDF 导出、`.nep` 项目文件、政策模板、
-> 打包尚未实现"。经逐文件核实，上述能力**均已实现**；真正尚未实现的是 `utils/`、
-> `TEST_PLAN.md`、`.nep` 迁移器与政策数值自动折算。本文档以磁盘真实代码为准。
+> **与早期项目概要的差异（V2.0.0 已更新）**：概要曾称"GUI、Excel/PDF 导出、`.nep` 项目文件、
+> 政策模板、打包尚未实现"。经逐文件核实，上述能力**均已实现**，且
+> `build/CENEP.spec`、`build/entry.py`、`build/version_info.txt` **均已存在**，
+> 产物 `dist\CENEP\CENEP.exe`（**21,958,256 字节**，版本资源 2.0.0）已构建并启动验证通过。
+> 真正尚未实现的是 **`utils/`** 与 **政策数值自动折算为电价**（`TEST_PLAN.md` 与
+> `.nep` 迁移器在 V2 中已落地）。本文档以磁盘真实代码为准。
 
 ### 6.8 §158 执行约束
 
