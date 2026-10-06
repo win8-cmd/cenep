@@ -8,6 +8,16 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .timeseries_results import (
+    BaselineResult,
+    DataQualityScore,
+    DispatchDecision,
+    EnergyBalance,
+    OptimizationResult,
+    ScenarioResult,
+    TimeSeriesReport,
+)
+
 
 class AnnualResult(BaseModel):
     """年度结果（规范 §80）。所有金额单位：元；电量单位：kWh。"""
@@ -178,6 +188,23 @@ class CalculationResult(BaseModel):
     # ---- 情景与敏感性（§92、§95，同属唯一结果对象，供 GUI/Excel/PDF 使用）----
     scenarios: list[ScenarioSummary] = Field(default_factory=list)
     sensitivity: list[SensitivityRow] = Field(default_factory=list)
+
+    # ---- V2 时序仿真（V2 §62 要求 CalculationResult 增加的字段）----
+    # time_series_results：8760 时序仿真总容器（列式逐时结果 + 指标 + 能量平衡 + 数据质量）
+    # baseline_results   ：基准方案（无 PV、无储能）电费与需量，用于计算节省额（V2 §42）
+    # dispatch_results   ：逐时调度决策与可解释原因（V2 §16）
+    # energy_balance     ：全场站能量守恒汇总（V2 §19、§70）
+    # data_quality       ：导入数据质量评分（V2 §55）
+    # scenario_results   ：方案比较（V2 §43、§44）
+    # optimization_results：扫描与寻优结果（V2 §45–§48）
+    # 注：annual_results 为 V1 既有字段，V2 沿用同一口径存放年度经济结果（V2 §62）。
+    time_series_results: TimeSeriesReport | None = None
+    baseline_results: BaselineResult | None = None
+    dispatch_results: list[DispatchDecision] = Field(default_factory=list)
+    energy_balance: EnergyBalance | None = None
+    data_quality: DataQualityScore | None = None
+    scenario_results: list[ScenarioResult] = Field(default_factory=list)
+    optimization_results: OptimizationResult | None = None
 
     # ---- 参数来源（§83、§108）----
     parameter_sources: dict[str, dict] = Field(default_factory=dict)

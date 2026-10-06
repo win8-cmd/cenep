@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
+from .base import NON_NEG, RATIO, _Model
 from .enums import (
     DepreciationMethod,
     InvestmentMode,
@@ -26,15 +27,9 @@ from .enums import (
     TariffMode,
 )
 from .provenance import ParameterMeta
+from .timeseries import TimeSeriesConfig
 
-RATIO = Field(default=0.0, ge=0.0, le=1.0, description="比例，内部统一用小数")
-NON_NEG = Field(default=0.0, ge=0.0, description="非负数值")
-
-
-class _Model(BaseModel):
-    """统一基类：禁止多余字段，保证模型与文档严格一致。"""
-
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+__all__ = ["NON_NEG", "RATIO", "_Model"]
 
 
 # --------------------------------------------------------------------------- #
@@ -446,6 +441,10 @@ class Project(_Model):
     policy: PolicyProfile | None = None
     scenario: ScenarioConfig = Field(default_factory=ScenarioConfig)
     sensitivity: SensitivityConfig = Field(default_factory=SensitivityConfig)
+
+    # V2 时序仿真配置（V2 §3、§6）。默认 enabled=False：完全走 V1 年度模式，
+    # 保证 V1 项目打开后行为与结果不变（V2 §1.1）。
+    timeseries: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
 
     analysis_period: int = Field(default=25, gt=0, le=40, description="项目生命周期（年，规范 §15）")
     discount_rate: float = Field(default=0.08, ge=0.0, le=0.5, description="折现率（规范 §72）")
