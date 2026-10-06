@@ -29,7 +29,7 @@
 
 | # | 规范要求 | 证据 | 结论 |
 |---|---|---|---|
-| 15 | V1 计算逻辑与结果不变（§1.1、§65、§84） | `year_override=None` 与不传该参数**逐位一致**（`test_v2_integration.py::TestEngineWiring::test_override_none_matches_plain_calculation`）；V1 Golden Case 280 项基线全绿 | ✅ |
+| 15 | V1 计算逻辑与结果不变（§1.1、§65、§84） | `year_override=None` 与不传该参数**逐位一致**（`test_v2_integration.py::TestEngineWiring::test_override_none_matches_plain_calculation`）；V1 Golden Case 全绿（V1 交付时 263 项基线，V2 全量为 885 项） | ✅ |
 | 16 | 未启用时序时结果对象不得出现 V2 内容 | `test_v1_untouched_when_timeseries_disabled`：`time_series_results is None`、`baseline_results is None`、`dispatch_results == []` | ✅ |
 | 17 | V2 模块延迟导入，V1 路径不加载 | `calculation_service._attach_timeseries` 内 `from ..calculation import economic_v2` | ✅ |
 | 18 | `.nep` 可读 V1 文件并迁移到 2.0（§64、§65） | `test_migration.py`（20 项）；迁移前后 IRR/NPV/LCOE/CAPEX **完全一致** | ✅ |
@@ -96,13 +96,46 @@
 
 ---
 
+## 七、打包验收（§107、Phase 12）
+
+| 项 | 结果 |
+|---|---|
+| 打包方式 | `pyinstaller build/CENEP.spec`（与 V1 同一方式；spec 内 `--windowed` + `COLLECT` 单目录） |
+| 产物路径 | **`dist\CENEP\CENEP.exe`**（与 V1 完全一致） |
+| EXE 大小 | **21,958,256 字节（20.94 MB）**；V1 为 16,032,252 字节，**+5,926,004 字节（+37.0%）** |
+| 体积变化原因 | **预期之内**：V2 新增运行时依赖 —— PyQtGraph（交互图表，含 `pyi_rth_pyqtgraph_multiprocess` 运行时钩子）、SciPy（`optimization/lp_optimizer.py` 的 `scipy.optimize.linprog(method="highs")`，含 `_highspy` 编译扩展与 4 个 DLL 搜索目录）、以及 V2 新增模块与 Excel 24 表模板 |
+| 版本信息 | 新增 `build/version_info.txt` 并接入 spec 的 `EXE(version=...)`；实测文件属性 **FileVersion = 2.0.0.0、ProductVersion = 2.0.0** |
+| spec 变更 | `hiddenimports` 追加 `pyqtgraph` 与 `scipy`（`scipy.optimize._linprog_highs` / `_highspy._core` / `_highspy._highs_wrapper` / `scipy.sparse._csc`），防止打包后 LP 寻优**静默降级** |
+| 启动验证 ①：自检 | `.NET ProcessStartInfo`（`UseShellExecute=$false` + 重定向 stdout/stderr）启动 `CENEP.exe --selftest <报告>` → **退出码 0**、耗时 **4.54 s**、报告 `{"ok": true, "stage": "done", "errors": []}`；三个黄金项目各导出 **24 张工作表** Excel + PDF（214 KB ±） |
+| 启动验证 ②：GUI | 无参数启动（`QT_QPA_PLATFORM=offscreen`）→ 进程**存活并进入 Qt 事件循环**（工作集 139.4 MB，即已完成 PySide6 + PyQtGraph 加载），stderr **无任何 traceback**；正常启动日志「启动 CENEP V1 / 加载政策模板 / 新建项目」齐全 |
+| 已知遗留 | 界面标题常量 `ui/app.py::APP_NAME` 仍为 `"CENEP V1"`（**属 `src/` 代码，本次收尾按硬性要求未改**）；建议后续版本改为 `"CENEP V2"` |
+
+> 验证命令（GUI 子系统 EXE 用 `&` 不会等待，必须用 `Start-Process -PassThru` 或
+> `.NET ProcessStartInfo` 才能拿到退出码与启动期错误）：
+>
+> ```powershell
+> $psi = New-Object System.Diagnostics.ProcessStartInfo
+> $psi.FileName = "$WS\dist\CENEP\CENEP.exe"
+> $psi.Arguments = "--selftest `"$WS\build\packaged_selftest_v2.json`""
+> $psi.WorkingDirectory = "$WS\dist\CENEP"
+> $psi.UseShellExecute = $false
+> $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+> $p = [System.Diagnostics.Process]::Start($psi)
+> $p.WaitForExit(240000) ; $p.ExitCode      # 期望 0
+> ```
+
+---
+
 ## 证据快照
 
 ```
 仓库         CENEP（分支 feature/v2-timeseries）
-测试          756 passed / 0 failed
-V1 基线       280 项全绿
+测试          885 passed / 0 failed（32 个测试文件）
+V1 基线       263 项（V1 交付时）；V2 全量 885 项，V1 用例无删除、无放宽
 单年 8760     81 ms（预算 2000 ms）
 120 候选扫描  8.0 s（预算 30 s）
 守恒误差      2.8e-14 kWh（容差 1e-6）
+打包产物      dist\CENEP\CENEP.exe  21,958,256 字节（V1：16,032,252 字节）
+              --selftest 退出码 0 / 4.54 s / ok=true / Excel 24 表 / PDF 3 份
+              版本资源 FileVersion 2.0.0.0、ProductVersion 2.0.0
 ```
