@@ -345,7 +345,12 @@ class TestProjectCompatibility:
         assert back.timeseries.holidays == [date(2025, 1, 1)]
 
         second = save_project(back, tmp_path / "V2项目2")
-        assert second.read_text(encoding="utf-8") == raw, "二次存盘结果必须与首次完全一致"
+        # 比较内容而非原始文本：saved_at 每次保存都会变，直接比文本会偶发失败
+        first_data = json.loads(raw)
+        second_data = json.loads(second.read_text(encoding="utf-8"))
+        first_data.pop("saved_at", None)
+        second_data.pop("saved_at", None)
+        assert second_data == first_data, "二次存盘内容必须与首次完全一致"
 
     def test_v1_nep_loads_without_timeseries_block(self, tmp_path, golden_pv):
         """§65：V1 的 .nep（无 timeseries 段）必须能照常打开。"""

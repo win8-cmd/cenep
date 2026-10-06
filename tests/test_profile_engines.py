@@ -298,9 +298,18 @@ class TestPVEquivalentHours:
         with pytest.raises(ValidationError, match="等效利用小时必须大于 0"):
             pp.resolve_pv_series(self._cfg(hours=0.0), axis, capacity_kwp=1000.0)
 
-    def test_requires_capacity(self, axis):
-        with pytest.raises(ValidationError, match="装机容量必须大于 0"):
-            pp.resolve_pv_series(self._cfg(), axis, capacity_kwp=0.0)
+    def test_zero_capacity_returns_zero_series(self, axis):
+        """V2 §78：PV 容量为 0 是**合法**输入（退化为纯电网负荷项目），出力恒为 0。
+
+        早期实现把 0 当错误抛异常，与 §78 的退化要求冲突，已改为返回全 0 序列。
+        """
+        out = pp.resolve_pv_series(self._cfg(), axis, capacity_kwp=0.0)
+        assert out.shape == (axis.point_count,)
+        assert np.all(out == 0.0)
+
+    def test_negative_capacity_rejected(self, axis):
+        with pytest.raises(ValidationError, match="不能为负数"):
+            pp.resolve_pv_series(self._cfg(), axis, capacity_kwp=-1.0)
 
 
 class TestPVHourlyAndCoefficients:

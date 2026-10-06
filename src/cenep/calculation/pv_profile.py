@@ -144,8 +144,12 @@ def resolve_pv_series(
     n = axis.point_count
     if n == 0:
         raise ValidationError("时间轴为空，无法解析光伏曲线", field="timeseries.pv")
-    if capacity_kwp <= 0.0:
-        raise ValidationError("光伏装机容量必须大于 0", field="timeseries.pv.capacity_kwp")
+    if capacity_kwp < 0.0:
+        raise ValidationError("光伏装机容量不能为负数", field="timeseries.pv.capacity_kwp")
+    if capacity_kwp == 0.0:
+        # V2 §78：PV 容量为 0 时项目退化为纯电网负荷项目，出力恒为 0。
+        # 这是合法输入（储能单独项目、容量扫描的 0 点），不是错误。
+        return np.zeros(n, dtype=float)
 
     pr = float(config.performance_ratio)
     target = float(config.capacity_kwp or capacity_kwp)

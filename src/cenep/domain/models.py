@@ -77,7 +77,14 @@ class LoadConfig(_Model):
 class PVConfig(_Model):
     """光伏参数（规范 §18–§25、§99）。"""
 
-    pv_capacity_kwp: float | None = Field(default=None, gt=0.0, description="直接输入装机容量 kWp")
+    pv_capacity_kwp: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "直接输入装机容量 kWp。允许 0 —— 表示本项目不装光伏"
+            "（V2 §78 要求 PV 容量为 0 时退化为纯电网负荷项目；储能侧容量同样允许 0）"
+        ),
+    )
     roof_area_m2: float = Field(default=0.0, ge=0.0, description="屋顶总面积 m²")
     usable_roof_area_m2: float = Field(default=0.0, ge=0.0, description="可利用屋顶面积 m²")
     area_per_kwp: float = Field(default=6.0, gt=0.0, description="单位容量占用面积 m²/kWp")

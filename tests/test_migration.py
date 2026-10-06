@@ -28,6 +28,17 @@ from cenep.infrastructure.project_file import (
 )
 
 
+def _stable_text(path: Path) -> str:
+    """规范化文件内容以便比较：剔除每次保存都会变的 ``saved_at``。
+
+    直接比较原始文本会**偶发失败**——两次存盘若跨过 1 秒整，``saved_at`` 就不同
+    （该 flaky 已由并行会话复现）。存盘幂等性要断言的是**内容**稳定，不是时间戳。
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("saved_at", None)
+    return json.dumps(data, ensure_ascii=False, sort_keys=True)
+
+
 def _v1_envelope(project: Project, schema: str = "1.0") -> dict:
     """构造一个 V1 风格的 .nep 信封：无 timeseries / migration_notes，schema 为 1.x。"""
     payload = json.loads(project.model_dump_json())
@@ -192,9 +203,9 @@ class TestSaveMetadata:
         assert again.schema_version == "2.0"
         assert again.basic_info.project_name == golden_pv.basic_info.project_name
         assert again.timeseries.enabled is False
-        # 二次存盘应幂等
+        # 二次存盘应幂等（比较内容，剔除会随时间变化的 saved_at）
         resaved = save_project(again, tmp_path / "v2b")
-        assert resaved.read_text(encoding="utf-8") == saved.read_text(encoding="utf-8")
+        assert _stable_text(resaved) == _stable_text(saved)
 
     def test_project_file_info_reports_v2(self, tmp_path, golden_pv):
         from cenep.infrastructure.project_file import read_file_info

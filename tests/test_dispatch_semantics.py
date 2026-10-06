@@ -41,19 +41,22 @@ from cenep.domain.timeseries import (
     TimePeriodRule,
 )
 
-#: 优化前记录的 Golden Case 基准（逐位一致回归用，rel=1e-12）
+#: 优化前记录的 Golden Case 基准（逐位一致回归用，rel=1e-12）。
+#: 说明：Phase 3 把 ``ANNUAL_SIMPLE`` 的逐时形状由"固定 60/40 昼夜比"改为
+#: "按典型日形状比例分配"（V2 §8 要求明确形状规则），负荷输入随之变化，
+#: 故此处基准为**新负荷形状**下重新记录的数值。
 BASELINE = {
-    "charge_sum": 959.4032236002463,
-    "discharge_sum": 0.0,
+    "charge_sum": 1712.0215343960615,
+    "discharge_sum": 1506.5789502685338,
     "grid_charge_sum": 0.0,
-    "pv_charge_sum": 959.4032236002463,
-    "grid_import_sum": 725820.0695879696,
-    "grid_export_sum": 324860.6663643695,
-    "electricity_cost_sum": 372515.0551577386,
-    "storage_revenue_sum": -335.7911282600862,
-    "export_revenue_sum": 113701.23322752933,
-    "soc_end_last": 1.0,
-    "soc_end_sum": 8687.57963922919,
+    "pv_charge_sum": 1712.0215343960615,
+    "grid_import_sum": 585333.876495056,
+    "grid_export_sum": 185128.43391092814,
+    "electricity_cost_sum": 318136.52036516287,
+    "storage_revenue_sum": 907.3714132299124,
+    "export_revenue_sum": 64794.951868824835,
+    "soc_end_last": 0.1,
+    "soc_end_sum": 6918.539768792172,
 }
 
 

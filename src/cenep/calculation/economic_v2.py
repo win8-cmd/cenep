@@ -271,9 +271,13 @@ def simulate_year(
     ts = project.timeseries
     capacity_kwp = float(ts.pv.capacity_kwp or project.pv.pv_capacity_kwp or 0.0)
 
-    load = load_mod.resolve_load(ts.load, axis, year_index)
-    pv = pv_mod.resolve_pv(
-        ts.pv, axis, capacity_kwp, float(project.pv.annual_degradation_rate), year_index
+    load = load_mod.resolve_load_series(ts.load, axis, year_index)
+    pv = pv_mod.resolve_pv_series(
+        ts.pv,
+        axis,
+        capacity_kwp,
+        year_index,
+        degradation_rate=float(project.pv.annual_degradation_rate),
     )
     tariff = tariff_mod.resolve_tariff(ts.tariff, axis, year_index)
 
