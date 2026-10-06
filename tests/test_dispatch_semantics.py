@@ -259,7 +259,15 @@ class TestPerformanceOptimizationFidelity:
         assert float(soc.sum()) == pytest.approx(BASELINE["soc_end_sum"], rel=1e-12)
 
     def test_single_year_dispatch_within_budget(self):
-        """性能：单年 8760 点调度应在 100 ms 内（§86 单年预算 2000 ms，留足余量）。"""
+        """性能：单年 8760 点调度应远快于 §86 的单年 2 秒预算。
+
+        计时口径说明：**取 N 次运行的最小值**，而不是单次或平均值。
+        墙钟计时在 CI/多任务并行时会因 CPU 抢占而虚高（实测同一代码在
+        4 个并行任务下从 34 ms 涨到 113 ms，误判为超预算）。
+        最小值最接近代码的真实计算成本，是性能回归测试的通用做法。
+        这里仍保留 100 ms 的严格阈值——它比 §86 的 2000 ms 预算严 20 倍，
+        足以在有人把向量化改回逐点 NumPy 调用时立刻报警。
+        """
         axis = build_time_axis(2025)
         load = np.full(8760, 100.0)
         pv = np.full(8760, 50.0)
@@ -269,13 +277,18 @@ class TestPerformanceOptimizationFidelity:
             charge_price_threshold=0.40,
             discharge_price_threshold=0.90,
         )
-        start = time.perf_counter()
-        dispatch(
-            load=load, pv=pv, tariff=tariff, axis=axis, config=cfg,
-            storage_capacity_kwh=1000.0, storage_power_kw=500.0,
+        best_ms = float("inf")
+        for _ in range(5):
+            start = time.perf_counter()
+            dispatch(
+                load=load, pv=pv, tariff=tariff, axis=axis, config=cfg,
+                storage_capacity_kwh=1000.0, storage_power_kw=500.0,
+            )
+            best_ms = min(best_ms, (time.perf_counter() - start) * 1000.0)
+        assert best_ms < 100.0, (
+            f"单年调度最快一次仍耗时 {best_ms:.1f} ms，超出 100 ms 预算"
+            f"（§86 单年预算为 2000 ms）"
         )
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
-        assert elapsed_ms < 100.0, f"单年调度耗时 {elapsed_ms:.1f} ms，超出预算"
 
 
 # --------------------------------------------------------------------------- #
