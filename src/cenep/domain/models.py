@@ -426,7 +426,10 @@ class Project(_Model):
     保存为 ``.nep`` 文件；其中 ``parameter_registry`` 记录每个重要参数的来源（规范 §83）。
     """
 
-    schema_version: str = "1.0"
+    schema_version: str = "2.0"
+
+    # V2 §65：V1 项目迁移留痕（既含参数未被修改，此处记录迁移过程供追溯）
+    migration_notes: list[str] = Field(default_factory=list)
 
     basic_info: BasicInfo = Field(default_factory=BasicInfo)
     load: LoadConfig = Field(default_factory=LoadConfig)

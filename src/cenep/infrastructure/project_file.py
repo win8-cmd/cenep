@@ -28,13 +28,25 @@ from pathlib import Path
 
 from .. import __version__
 from ..domain.models import Project
+from .migration import (
+    CALCULATION_ENGINE_VERSION,
+    CURRENT_SCHEMA_VERSION,
+    LEGACY_SCHEMA_VERSIONS,
+    MigrationError,
+    migrate_project_payload,
+)
+from .logging_setup import get_logger
+
+logger = get_logger()
 
 #: 项目文件扩展名（规范 §9）
 NEP_SUFFIX = ".nep"
 #: 文件格式标识
 FILE_FORMAT = "cenep-project"
-#: 当前 schema 版本
-SCHEMA_VERSION = "1.0"
+#: 当前 schema 版本（V2 §64：写入 2.0；V1 的 1.x 文件打开时自动迁移，见 migration.py）
+SCHEMA_VERSION = CURRENT_SCHEMA_VERSION
+#: 可以被自动迁移的旧版本
+MIGRATABLE_SCHEMA_VERSIONS = LEGACY_SCHEMA_VERSIONS
 
 
 class ProjectFileError(Exception):
@@ -92,6 +104,14 @@ def save_project(project: Project, path: str | Path) -> Path:
         "format": FILE_FORMAT,
         "schema_version": SCHEMA_VERSION,
         "app_version": __version__,
+        # V2 §95：项目必须保存四个版本号，保证历史项目结果可追溯（V2 §94）
+        "calculation_version": CALCULATION_ENGINE_VERSION,
+        "policy_version": (
+            project.policy.profile_id if getattr(project, "policy", None) is not None else ""
+        ),
+        "tariff_version": project.tariff.tariff_version
+        if hasattr(project.tariff, "tariff_version")
+        else "",
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "project": project.model_dump(mode="json"),
     }
@@ -118,17 +138,32 @@ def load_project(path: str | Path) -> Project:
         raise ProjectFileError("不是本软件的项目文件（缺少 format 标识）", source)
 
     schema = str(raw.get("schema_version", ""))
-    if schema != SCHEMA_VERSION:
+    if schema not in (SCHEMA_VERSION, *MIGRATABLE_SCHEMA_VERSIONS):
         raise ProjectFileError(
-            f"项目文件版本不兼容：文件为 {schema or '未知'}，当前软件支持 {SCHEMA_VERSION}", source
+            f"项目文件版本不兼容：文件为 {schema or '未知'}，当前软件支持 {SCHEMA_VERSION}"
+            f"（可自动迁移：{'、'.join(MIGRATABLE_SCHEMA_VERSIONS)}）",
+            source,
         )
 
     project_payload = raw.get("project")
     if not isinstance(project_payload, dict):
         raise ProjectFileError("项目文件缺少 project 内容", source)
 
+    # V1 → V2 等旧版本迁移（V2 §65）：只补默认值与版本元数据，不改动既有参数
     try:
-        return Project.model_validate(project_payload)
+        outcome = migrate_project_payload(project_payload, schema)
+    except MigrationError as exc:
+        raise ProjectFileError(str(exc), source) from exc
+    if outcome.migrated:
+        logger.info(
+            "项目文件迁移：%s → %s（%d 项说明）",
+            outcome.from_version,
+            outcome.to_version,
+            len(outcome.notes),
+        )
+
+    try:
+        return Project.model_validate(outcome.payload)
     except Exception as exc:  # pydantic ValidationError 等
         raise ProjectFileError(f"项目内容校验失败：{exc}", source) from exc
 
