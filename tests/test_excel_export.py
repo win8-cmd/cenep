@@ -40,12 +40,38 @@ class TestWorkbookStructure:
         assert path.name == "全屋面2061.8kWp_经济评价.xlsx"
         assert path.exists()
 
-    def test_thirteen_sheets_in_required_order(self, exported):
-        """§108：必须生成 13 张工作表。"""
+    def test_sheets_match_names_and_count(self, exported):
+        """V2 §67：工作表清单为 V1 §108 的 13 张 + V2 新增 11 张时序表 = 24 张。
+
+        这是 V2 §67「至少包含」对 V1 §108 的**正当超集扩展**：
+        V1 的 13 张全部保留且相对顺序不变，新增表在无时序数据时输出占位说明，
+        因此 V1 项目仍可正常导出（见 test_v1_project_still_exports）。
+        """
         _, _, path = exported
         wb = load_workbook(path)
         assert wb.sheetnames == SHEET_NAMES
-        assert len(wb.sheetnames) == 13
+        assert len(wb.sheetnames) == 24
+
+    def test_v2_sheets_included(self, exported):
+        """V2 §67 要求的新增表必须存在。"""
+        _, _, path = exported
+        names = set(load_workbook(path).sheetnames)
+        for required in (
+            "储能与调度", "负荷曲线", "光伏曲线", "分时电价", "8760时序仿真",
+            "能量平衡", "年度汇总", "收益分解", "方案比较", "方案寻优", "数据质量",
+        ):
+            assert required in names, f"缺少 V2 §67 要求的表：{required}"
+
+    def test_v1_sheets_preserved(self, exported):
+        """V1 的 13 张表一张都不能少。"""
+        _, _, path = exported
+        names = set(load_workbook(path).sheetnames)
+        for legacy in (
+            "项目概况", "基础参数", "技术参数", "电价参数", "投资参数", "运维参数",
+            "融资参数", "年度现金流", "财务指标", "敏感性分析", "情景分析",
+            "政策依据", "参数来源",
+        ):
+            assert legacy in names, f"V1 表被破坏：{legacy}"
 
     def test_declared_sheet_names_match_actual(self, exported):
         _, result, path = exported

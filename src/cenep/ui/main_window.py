@@ -39,6 +39,7 @@ from .pages import (
     ResultPage,
     SensitivityPage,
     SettingsPage,
+    TimeSeriesPage,
 )
 
 logger = get_logger()
@@ -95,6 +96,7 @@ class MainWindow(QMainWindow):
         self.parameters_page = ParametersPage(self.tabs)
         self.calculate_page = CalculatePage(self.tabs)
         self.result_page = ResultPage(self.tabs)
+        self.timeseries_page = TimeSeriesPage(self.tabs)
         self.sensitivity_page = SensitivityPage(self.tabs)
         self.report_page = ReportPage(self.tabs)
         self.settings_page = SettingsPage(self.tabs)
@@ -104,6 +106,7 @@ class MainWindow(QMainWindow):
             (self.parameters_page, "参数"),
             (self.calculate_page, "计算"),
             (self.result_page, "结果"),
+            (self.timeseries_page, "时序仿真"),
             (self.sensitivity_page, "敏感性"),
             (self.report_page, "报告"),
             (self.settings_page, "设置"),
@@ -252,6 +255,7 @@ class MainWindow(QMainWindow):
             "计算成功。\n\n口径说明：\n" + "\n".join(f"• {n}" for n in outcome.result.notes)
         )
         self.result_page.show_result(outcome.result)
+        self.timeseries_page.show_result(project, outcome.result)
         self.sensitivity_page.show_result(outcome.result)
         self.report_page.show_result(project, outcome.result)
         self.tabs.setCurrentWidget(self.result_page)
@@ -334,6 +338,7 @@ class MainWindow(QMainWindow):
         self.last_result = outcome.result
         self.calculate_page.status_label.setText(f"计算完成，耗时 {outcome.elapsed_seconds:.3f} 秒")
         self.result_page.show_result(outcome.result)
+        self.timeseries_page.show_result(project, outcome.result)
         self.sensitivity_page.show_result(outcome.result)
         self.report_page.show_result(project, outcome.result)
         return outcome.result

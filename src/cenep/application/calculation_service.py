@@ -1,26 +1,35 @@
-"""计算服务：唯一计算入口的应用层封装（规范 §8、§134、§147–§150）。
+"""计算服务：唯一计算入口的应用层封装（规范 §8、§134、§147–§150；V2 §61、§105）。
 
 职责边界
 --------
 * **不做任何计算**：校验、公式、指标全部由 :mod:`cenep.calculation` 完成；
 * 负责：计算前自动保存、日志、异常翻译、耗时统计；
+* 负责：启用 V2 时序仿真时的**口径归一化**——把项目类型调整到与用户实际配置的
+  容量一致（V2 §105 结果一致性），使年度模型与逐时仿真使用同一套储能/光伏口径。
+  归一化只在 ``timeseries.enabled`` 为真时发生，且在**副本**上进行，绝不修改调用方对象；
+  V1（未启用时序）路径**不做**任何归一化，保持 §1.1 兼容性承诺；
 * GUI / Excel / PDF 都必须经由本服务拿到 :class:`CalculationResult`。
 """
 
 from __future__ import annotations
 
+import copy
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..calculation.engine import CalculationEngine, calculation_engine
 from ..calculation.errors import CalculationError
+from ..domain.enums import DispatchStrategy, ProjectType
 from ..domain.models import Project
 from ..domain.results import CalculationResult
 from ..infrastructure.logging_setup import get_logger
 from .project_service import ProjectService
 
 logger = get_logger()
+
+#: 归一化说明的固定措辞（用户提示、报表与测试据此检索，不得随意改动）
+ALIGNMENT_NOTE_KEYWORD = "项目类型已按容量自动判定"
 
 
 @dataclass(frozen=True)
@@ -30,6 +39,209 @@ class CalculationOutcome:
     result: CalculationResult
     elapsed_seconds: float
     autosaved_to: Path | None
+
+
+@dataclass(frozen=True)
+class ProjectTypeAlignment:
+    """V2 时序项目的**类型归一化**结果（V2 §105 结果一致性）。
+
+    ``project`` 是归一化后的**副本**：调用方传入的项目对象（含其
+    ``basic_info.project_type``）始终不被修改。
+    """
+
+    #: 归一化后的项目副本（年度模型与时序仿真都以它为准）
+    project: Project
+    #: 调用方配置的项目类型
+    original_type: ProjectType
+    #: 按实际容量判定的项目类型
+    aligned_type: ProjectType
+    #: 时序仿真实际使用的光伏容量 kWp（口径见 ``scenario_engine.effective_pv_capacity``）
+    pv_capacity_kwp: float
+    #: 储能容量 kWh
+    storage_energy_kwh: float
+    #: 类型确实被调整时的中文说明；未调整时为 ``None``
+    note: str | None
+    #: 「储能容量为 0 但配置要求储能」时的中文告警；无此情形时为 ``None``
+    warning: str | None
+
+    @property
+    def changed(self) -> bool:
+        """类型是否被归一化调整过。"""
+        return self.original_type is not self.aligned_type
+
+    @property
+    def has_pv(self) -> bool:
+        """时序仿真是否使用光伏（容量 > 0）。"""
+        return self.pv_capacity_kwp > 0.0
+
+    @property
+    def has_storage(self) -> bool:
+        """时序仿真是否使用储能（容量 > 0）。"""
+        return self.storage_energy_kwh > 0.0
+
+
+def align_project_type(project: Project) -> ProjectTypeAlignment:
+    """按**用户实际配置的容量**归一化项目类型，返回副本与中文说明（V2 §105）。
+
+    背景（V2 并行会话在报表开发中发现的真实缺陷）
+    ---------------------------------------------
+    典型 V2 项目只配置 ``project.storage.storage_energy_kwh = 1000`` 与
+    ``storage_power_kw = 500``，却没有设置 ``basic_info.project_type``（默认
+    ``COMMERCIAL_PV``）。此时：
+
+    * 逐时仿真 ``economic_v2.simulate_project`` **确实**用了 1000 kWh 储能；
+    * 年度模型按类型的 ``has_storage == False`` 计算，储能**不计造价、不计循环**；
+    * 服务又把时序的储能套利收益通过 ``year_override`` 注入年度模型。
+
+    结果是"算了储能收益、没算储能造价"，IRR / NPV 被系统性高估，同一份
+    :class:`CalculationResult` 内部也自相矛盾（年度模型说无储能、时序说有）。
+
+    归一化规则
+    ----------
+    直接复用 :func:`cenep.calculation.scenario_engine.normalize_project_type`
+    （Phase 8 已实现的同一逻辑，本模块不重复实现）：
+
+    * 光伏 > 0 且 储能 > 0 → ``PV_STORAGE``
+    * 光伏 > 0 且 储能 = 0 → ``COMMERCIAL_PV``
+    * 光伏 = 0 且 储能 > 0 → ``COMMERCIAL_STORAGE``
+    * 两者都为 0 → 保留原类型（无对应类型，属 §42 基准方案）
+
+    调用约束
+    --------
+    只允许在 ``project.timeseries.enabled`` 为真时调用；V1 路径必须原样交给
+    V1 校验器报错（V2 §1.1 兼容性红线）。``project`` 不会被修改，改的是内部副本。
+
+    :raises CalculationError: 归一化后年度模型仍判定"无储能/无光伏"，与逐时仿真
+        实际使用的容量口径矛盾——这是内部不一致，必须显式失败，**不得**静默继续
+        （静默继续正是 IRR 被高估的成因）。
+    """
+    # V2 模块延迟导入：未启用时序的项目（V1）不加载 V2 代码（V2 §1.1）。
+    from ..calculation.scenario_engine import effective_pv_capacity, normalize_project_type
+
+    clone = copy.deepcopy(project)
+    original_type = clone.basic_info.project_type
+    pv_capacity = effective_pv_capacity(clone)
+    storage_energy = float(clone.storage.storage_energy_kwh)
+    has_pv = pv_capacity > 0.0
+    has_storage = storage_energy > 0.0
+
+    aligned_type = normalize_project_type(clone)
+
+    # ---- 反向保护 ①：时序用储能、年度模型却不含储能 → 内部不一致，必须报错 ---- #
+    if has_storage and not aligned_type.has_storage:
+        raise CalculationError(
+            "项目类型与储能容量口径不一致（内部一致性错误）：时序仿真按储能容量 "
+            f"{storage_energy:g} kWh 计算，但年度模型的项目类型为「{aligned_type.label}」"
+            f"（{aligned_type.value}），该类型不含储能。继续计算会出现"
+            "「计入储能收益却不计储能造价」，使 IRR / NPV 被高估，因此拒绝计算。"
+            "请检查项目类型归一化逻辑（V2 §105 结果一致性）。",
+            field="basic_info.project_type",
+        )
+    # ---- 反向保护 ②：同理，时序用光伏而年度模型不含光伏 ---- #
+    if has_pv and not aligned_type.has_pv:
+        raise CalculationError(
+            "项目类型与光伏容量口径不一致（内部一致性错误）：时序仿真按光伏容量 "
+            f"{pv_capacity:g} kWp 计算，但年度模型的项目类型为「{aligned_type.label}」"
+            f"（{aligned_type.value}），该类型不含光伏。继续计算会出现"
+            "「计入光伏收益却不计光伏造价」，使 IRR / NPV 被高估，因此拒绝计算"
+            "（V2 §105 结果一致性）。",
+            field="basic_info.project_type",
+        )
+
+    note = (
+        _alignment_note(original_type, aligned_type, pv_capacity, storage_energy)
+        if aligned_type is not original_type
+        else None
+    )
+    warning = None if has_storage else _storage_missing_warning(clone, aligned_type)
+
+    if note is not None:
+        logger.info(
+            "项目类型已按容量归一化：%s → %s（光伏 %g kWp、储能 %g kWh，V2 §105）",
+            original_type.value,
+            aligned_type.value,
+            pv_capacity,
+            storage_energy,
+        )
+    if warning is not None:
+        logger.warning("储能容量为 0 但配置要求储能：%s", warning)
+
+    return ProjectTypeAlignment(
+        project=clone,
+        original_type=original_type,
+        aligned_type=aligned_type,
+        pv_capacity_kwp=pv_capacity,
+        storage_energy_kwh=storage_energy,
+        note=note,
+        warning=warning,
+    )
+
+
+def _alignment_note(
+    original_type: ProjectType,
+    aligned_type: ProjectType,
+    pv_capacity_kwp: float,
+    storage_energy_kwh: float,
+) -> str:
+    """归一化说明（中文，写入 ``CalculationResult.notes``，V2 §105）。"""
+    basis: list[str] = []
+    if pv_capacity_kwp > 0.0:
+        basis.append(f"光伏容量 {pv_capacity_kwp:g} kWp > 0")
+    if storage_energy_kwh > 0.0:
+        basis.append(f"储能容量 {storage_energy_kwh:g} kWh > 0")
+    if not basis:
+        basis.append("光伏容量与储能容量均为 0")
+    return (
+        f"{ALIGNMENT_NOTE_KEYWORD}为「{aligned_type.label}」（{aligned_type.value}）："
+        f"依据为{'、'.join(basis)}；用户配置的类型为"
+        f"「{original_type.label}」（{original_type.value}）。"
+        "年度模型与逐时时序仿真已统一到同一套光伏/储能口径，"
+        "不会出现「计入储能收益却不计储能造价」的高估（V2 §105 结果一致性）。"
+    )
+
+
+def _storage_missing_warning(project: Project, aligned_type: ProjectType) -> str | None:
+    """「时序启用、储能容量为 0」但配置明显要求储能时的中文告警（V2 §105）。
+
+    该情形不在 §105 的"不一致"之列（两边都是无储能，口径一致），但用户很可能是
+    **漏填了储能容量**，因此给出明确告警而不是静默按无储能处理。
+    返回 ``None`` 表示配置中没有任何要求储能的证据。
+    """
+    reason = _storage_expectation_reason(project)
+    if not reason:
+        return None
+    return (
+        f"储能容量为 0，本次计算按「{aligned_type.label}」（{aligned_type.value}）处理："
+        "年度模型与逐时时序仿真均不计储能（无充放电、无储能造价、无套利收益）；"
+        f"但配置中仍存在储能相关设置——{reason}。"
+        "请确认是否漏填 storage.storage_energy_kwh，或清除上述储能配置后重新计算"
+        "（V2 §105）。"
+    )
+
+
+def _storage_expectation_reason(project: Project) -> str:
+    """找出"储能容量为 0、但配置仍要求储能"的证据（中文；空串 = 无证据）。"""
+    storage = project.storage
+    reasons: list[str] = []
+    if float(storage.storage_power_kw) > 0.0:
+        reasons.append(
+            f"储能功率 {float(storage.storage_power_kw):g} kW > 0（容量为 0 时功率无意义）"
+        )
+    if any(
+        float(value) > 0.0
+        for value in (
+            storage.annual_capacity_revenue,
+            storage.annual_ancillary_revenue,
+            storage.annual_other_revenue,
+        )
+    ):
+        reasons.append("已填写储能容量/辅助服务/其他收益")
+    if storage.replacement_year is not None or float(storage.replacement_capex) > 0.0:
+        reasons.append("已填写储能电芯更换年份或更换投资")
+    strategy = project.timeseries.dispatch.strategy
+    if strategy in (DispatchStrategy.PEAK_VALLEY, DispatchStrategy.ECONOMIC_OPTIMIZATION):
+        reasons.append(f"储能调度策略为「{strategy.label}」（以充放电为前提）")
+    return "；".join(reasons)
 
 
 class CalculationService:
@@ -79,10 +291,20 @@ class CalculationService:
             # 保证未启用时序的项目不会加载 V2 模块（V2 §1.1 兼容性）。
             simulation = None
             year_override = None
+            alignment: ProjectTypeAlignment | None = None
+            # V2 §105：启用时序时必须先按实际配置的容量归一化项目类型，
+            # 让年度模型与时序仿真使用同一个储能口径（否则"算了储能收益、
+            # 没算储能造价"，IRR / NPV 被高估）。归一化在副本上进行，
+            # 调用方传入的 project 对象不被修改。
+            # V1（未启用时序）**不做**任何归一化，原样交给 V1 校验器报错（§1.1）。
+            calculation_project = project
             if project.timeseries.enabled:
+                alignment = align_project_type(project)
+                calculation_project = alignment.project
+
                 from ..calculation import economic_v2
 
-                simulation = economic_v2.simulate_project(project)
+                simulation = economic_v2.simulate_project(calculation_project)
                 year_override = simulation.overrides()
                 logger.info(
                     "时序仿真完成：%d 年，耗时 %.3f 秒，最大守恒误差 %.3e kWh",
@@ -92,13 +314,19 @@ class CalculationService:
                 )
 
             result = self.engine.calculate(
-                project,
+                calculation_project,
                 include_scenario=include_scenario,
                 include_sensitivity=include_sensitivity,
                 year_override=year_override,
             )
+            if alignment is not None:
+                # 口径归一化必须对用户可见（§161 可追溯；V2 §105 一致性）
+                if alignment.note:
+                    result.notes.append(alignment.note)
+                if alignment.warning:
+                    result.notes.append(alignment.warning)
             if simulation is not None:
-                self._attach_timeseries(result, project, simulation)
+                self._attach_timeseries(result, calculation_project, simulation)
         except CalculationError as exc:
             logger.warning("计算失败：%s", exc)
             raise

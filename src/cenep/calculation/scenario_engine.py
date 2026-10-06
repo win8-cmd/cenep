@@ -1147,7 +1147,8 @@ class CandidateEvaluator:
         lines.append(
             f"本次寻优目标为「{objective.label}」（{objective.value}，"
             f"{'越大越好' if is_maximization(objective) else '越小越好'}），"
-            f"共评估 {len(ranked)} 个候选方案，其中可行 {len(feasible)} 个、"
+            f"共输出 {len(ranked)} 个候选方案（其中 {self.evaluations} 个完成时序仿真评估，"
+            f"其余在结构性剪枝阶段被剔除），可行 {len(feasible)} 个、"
             f"不可行 {len(ranked) - len(feasible)} 个。"
         )
         if best is None or best_scenario is None:

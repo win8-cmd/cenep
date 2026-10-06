@@ -7,9 +7,14 @@
 from __future__ import annotations
 
 from ..domain.enums import (
+    DispatchStrategy,
     InvestmentMode,
+    LoadProfileMode,
+    MissingDataPolicy,
     OpexMode,
+    PVProfileMode,
     RepaymentMethod,
+    Resolution,
     RoofRentMode,
     SourceType,
     TariffMode,
@@ -37,6 +42,13 @@ REPAYMENT_CHOICES = (
     (RepaymentMethod.EQUAL_PRINCIPAL.value, "等额本金"),
     (RepaymentMethod.EQUAL_INSTALLMENT.value, "等额本息"),
 )
+
+# ---- V2 §3 P0.1–P0.4、§12 时序与策略枚举选项（值取自枚举本身，防止手写字符串拼错）----
+RESOLUTION_CHOICES = tuple((m.value, m.label) for m in Resolution)
+LOAD_PROFILE_MODE_CHOICES = tuple((m.value, m.label) for m in LoadProfileMode)
+PV_PROFILE_MODE_CHOICES = tuple((m.value, m.label) for m in PVProfileMode)
+MISSING_DATA_POLICY_CHOICES = tuple((m.value, m.label) for m in MissingDataPolicy)
+DISPATCH_STRATEGY_CHOICES = tuple((m.value, m.label) for m in DispatchStrategy)
 
 PCT = 100.0
 
@@ -278,6 +290,279 @@ FINANCING_SECTION = SectionSpec(
     ],
 )
 
+# --------------------------------------------------------------------------- #
+# V2 时序仿真（V2 §3、§6、§7、§19）
+# --------------------------------------------------------------------------- #
+TIMESERIES_SECTION = SectionSpec(
+    "时序仿真总开关",
+    [
+        FieldSpec(
+            "timeseries.enabled",
+            "启用 8760 时序仿真",
+            Kind.BOOL,
+            tooltip="关闭时完全走 V1 年度模式，结果与 V1 一致（V2 §1.1）",
+        ),
+        FieldSpec(
+            "timeseries.resolution",
+            "计算粒度",
+            Kind.CHOICE,
+            choices=RESOLUTION_CHOICES,
+            tooltip="V2 §3 P0.1：默认 1 小时；15 分钟为预留接口",
+        ),
+        FieldSpec(
+            "timeseries.base_year",
+            "仿真基准年",
+            Kind.INT,
+            "年",
+            2000,
+            2100,
+            step=1,
+            tooltip="V2 §3 P0.1：决定平年 8760 / 闰年 8784",
+        ),
+        FieldSpec(
+            "timeseries.balance_tolerance",
+            "能量平衡容差",
+            Kind.FLOAT,
+            "kWh",
+            0,
+            1000,
+            decimals=8,
+            step=1e-06,
+            tooltip="V2 §19：任一小时偏差超过该值即判定计算失败，默认 1e-6",
+        ),
+    ],
+)
+
+TS_LOAD_SECTION = SectionSpec(
+    "负荷曲线",
+    [
+        FieldSpec(
+            "timeseries.load.mode",
+            "负荷曲线来源",
+            Kind.CHOICE,
+            choices=LOAD_PROFILE_MODE_CHOICES,
+            tooltip="V2 §8.1 优先级：用户 8760 > 典型日 > 模板 > 经验参数",
+        ),
+        FieldSpec(
+            "timeseries.load.annual_energy_kwh",
+            "年用电量",
+            Kind.FLOAT,
+            "kWh",
+            0,
+            1e12,
+            decimals=0,
+            step=10000.0,
+            tooltip="V2 §8：典型日模式下用于把曲线缩放到该年电量",
+        ),
+        FieldSpec(
+            "timeseries.load.annual_growth_rate",
+            "年负荷增长率",
+            Kind.PERCENT,
+            "%",
+            -50,
+            PCT,
+            tooltip="V2 §8.3：Load_n = Load_1 × (1+g)^(n-1)",
+        ),
+        FieldSpec(
+            "timeseries.load.missing_data_policy",
+            "缺失数据处理",
+            Kind.CHOICE,
+            choices=MISSING_DATA_POLICY_CHOICES,
+            tooltip="V2 §53：默认禁止静默填充，必须报出缺失点数",
+        ),
+    ],
+)
+
+TS_PV_SECTION = SectionSpec(
+    "光伏出力曲线",
+    [
+        FieldSpec(
+            "timeseries.pv.mode",
+            "光伏曲线来源",
+            Kind.CHOICE,
+            choices=PV_PROFILE_MODE_CHOICES,
+            tooltip="V2 §9：导入曲线 / 典型日 / 月度小时系数 / 年等效小时",
+        ),
+        FieldSpec(
+            "timeseries.pv.equivalent_hours",
+            "年等效利用小时",
+            Kind.FLOAT,
+            "h",
+            0,
+            8760,
+            decimals=2,
+            step=10.0,
+            tooltip="V2 §9：等效小时模式下全年发电量 = 容量 × 该小时数",
+        ),
+        FieldSpec(
+            "timeseries.pv.performance_ratio",
+            "性能比 PR",
+            Kind.PERCENT,
+            "%",
+            0,
+            PCT,
+            tooltip="V2 §9.1：PV_t = Profile_t × 容量 × PR；等效小时已含损失时填 100%",
+        ),
+        FieldSpec(
+            "timeseries.pv.capacity_kwp",
+            "光伏容量（覆盖项）",
+            Kind.OPTIONAL_FLOAT,
+            "kWp",
+            0,
+            1e7,
+            decimals=2,
+            step=10.0,
+            optional_label="指定时序容量",
+            tooltip="留空则沿用「光伏参数」页的装机容量",
+        ),
+        FieldSpec(
+            "timeseries.pv.missing_data_policy",
+            "缺失数据处理",
+            Kind.CHOICE,
+            choices=MISSING_DATA_POLICY_CHOICES,
+            tooltip="V2 §53",
+        ),
+    ],
+)
+
+TS_TARIFF_SECTION = SectionSpec(
+    "分时电价",
+    [
+        FieldSpec("timeseries.tariff.profile.sharp_peak_price", "尖峰电价", Kind.FLOAT, "元/kWh", 0, 100, decimals=4, step=0.01),
+        FieldSpec("timeseries.tariff.profile.peak_price", "高峰电价", Kind.FLOAT, "元/kWh", 0, 100, decimals=4, step=0.01),
+        FieldSpec("timeseries.tariff.profile.flat_price", "平段电价", Kind.FLOAT, "元/kWh", 0, 100, decimals=4, step=0.01),
+        FieldSpec("timeseries.tariff.profile.valley_price", "谷段电价", Kind.FLOAT, "元/kWh", 0, 100, decimals=4, step=0.01),
+        FieldSpec("timeseries.tariff.profile.deep_valley_price", "深谷电价", Kind.FLOAT, "元/kWh", 0, 100, decimals=4, step=0.01),
+        FieldSpec("timeseries.tariff.profile.export_price", "上网电价", Kind.FLOAT, "元/kWh", 0, 100, decimals=4, step=0.01),
+        FieldSpec(
+            "timeseries.tariff.annual_growth_rate",
+            "电价年增长率",
+            Kind.PERCENT,
+            "%",
+            -50,
+            PCT,
+            tooltip="V2 §17.2：Price_n = Price_1 × (1+g)^(n-1)；上网电价不随该系数增长",
+        ),
+        FieldSpec(
+            "timeseries.tariff.demand_charge_enabled",
+            "计入需量电费",
+            Kind.BOOL,
+            tooltip="V2 §18：两部制电价用户建议开启",
+        ),
+        FieldSpec("timeseries.tariff.profile.demand_charge", "需量电价", Kind.FLOAT, "元/kW·月", 0, 10000, decimals=2, step=1.0),
+        FieldSpec("timeseries.tariff.basic_charge_enabled", "计入基本电费", Kind.BOOL),
+        FieldSpec("timeseries.tariff.profile.basic_charge", "基本电费", Kind.FLOAT, "元/月", 0, 1e7, decimals=2, step=100.0),
+    ],
+)
+
+TS_DISPATCH_SECTION = SectionSpec(
+    "储能调度策略",
+    [
+        FieldSpec(
+            "timeseries.dispatch.strategy",
+            "调度策略",
+            Kind.CHOICE,
+            choices=DISPATCH_STRATEGY_CHOICES,
+            tooltip="V2 §12 峰谷套利 / §13 光伏自用优先 / §14 规则型经济优化",
+        ),
+        FieldSpec("timeseries.dispatch.soc_min", "SOC 下限", Kind.PERCENT, "%", 0, PCT, tooltip="V2 §10.1"),
+        FieldSpec("timeseries.dispatch.soc_max", "SOC 上限", Kind.PERCENT, "%", 0, PCT, tooltip="V2 §10.1"),
+        FieldSpec("timeseries.dispatch.initial_soc", "起始 SOC", Kind.PERCENT, "%", 0, PCT, tooltip="V2 §10.5"),
+        FieldSpec(
+            "timeseries.dispatch.charge_efficiency",
+            "充电效率",
+            Kind.PERCENT,
+            "%",
+            0,
+            PCT,
+            tooltip="V2 §10.3：内部增量 = AC 充电量 × η；默认 √0.88 与 V1 往返效率一致",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.discharge_efficiency",
+            "放电效率",
+            Kind.PERCENT,
+            "%",
+            0,
+            PCT,
+            tooltip="V2 §10.4：内部减少 = AC 放电量 ÷ η",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.max_charge_power",
+            "最大充电功率",
+            Kind.FLOAT,
+            "kW",
+            0,
+            1e7,
+            decimals=2,
+            step=10.0,
+            tooltip="V2 §11：填 0 表示按储能额定功率",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.max_discharge_power",
+            "最大放电功率",
+            Kind.FLOAT,
+            "kW",
+            0,
+            1e7,
+            decimals=2,
+            step=10.0,
+            tooltip="V2 §11：填 0 表示按储能额定功率",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.allow_grid_charge",
+            "允许电网充电",
+            Kind.BOOL,
+            tooltip="V2 §21：总开关，默认关闭",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.charge_from_grid",
+            "策略主动电网充电",
+            Kind.BOOL,
+            tooltip="V2 §21：需与总开关同时打开；电网充电量会单独统计",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.allow_export",
+            "允许储能上网",
+            Kind.BOOL,
+            tooltip="V2 §20：默认关闭，禁止无意义上网",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.charge_from_pv",
+            "允许光伏给储能充电",
+            Kind.BOOL,
+            tooltip="V2 §13：光伏盈余优先给储能充电",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.allow_arbitrage",
+            "允许峰谷套利",
+            Kind.BOOL,
+            tooltip="V2 §12：低价充、高价放",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.charge_price_threshold",
+            "充电价格阈值",
+            Kind.FLOAT,
+            "元/kWh",
+            0,
+            100,
+            decimals=4,
+            step=0.01,
+            tooltip="V2 §12：电价不高于该值才充电；填 0 表示不启用阈值",
+        ),
+        FieldSpec(
+            "timeseries.dispatch.discharge_price_threshold",
+            "放电价格阈值",
+            Kind.FLOAT,
+            "元/kWh",
+            0,
+            100,
+            decimals=4,
+            step=0.01,
+            tooltip="V2 §12：电价不低于该值才放电",
+        ),
+    ],
+)
+
 #: 界面按顺序展示的全部分组（参数页用）
 ALL_SECTIONS: tuple[SectionSpec, ...] = (
     GENERAL_SECTION,
@@ -289,6 +574,11 @@ ALL_SECTIONS: tuple[SectionSpec, ...] = (
     OPEX_SECTION,
     TAX_SECTION,
     FINANCING_SECTION,
+    TIMESERIES_SECTION,
+    TS_LOAD_SECTION,
+    TS_PV_SECTION,
+    TS_TARIFF_SECTION,
+    TS_DISPATCH_SECTION,
 )
 
 #: 参数来源说明（用于界面提示，规范 §144）
@@ -310,6 +600,11 @@ __all__ = [
     "OPEX_SECTION",
     "TAX_SECTION",
     "FINANCING_SECTION",
+    "TIMESERIES_SECTION",
+    "TS_LOAD_SECTION",
+    "TS_PV_SECTION",
+    "TS_TARIFF_SECTION",
+    "TS_DISPATCH_SECTION",
     "SOURCE_LEGEND",
     "SourceType",
 ]

@@ -121,13 +121,13 @@ def optimize(
             recommendation.storage_energy_kwh,
             recommendation.storage_power_kw,
         )
+    seed_point = current
 
     evaluator = se.CandidateEvaluator(
         project, objective=objective, axis=resolved_axis, budget=budget
     )
     truncated = False
     evaluated_stages: list[str] = []
-    best_overall: OptimizationCandidate | None = None
 
     stage_plan = (
         ("PV", 0),
@@ -149,8 +149,6 @@ def optimize(
                 )
                 if _is_better(objective, candidate, stage_best):
                     stage_best = candidate
-                if _is_better(objective, candidate, best_overall):
-                    best_overall = candidate
             if truncated:
                 break
             if stage_best is not None and stage_best.feasible:
@@ -179,9 +177,12 @@ def optimize(
         + f"；实际评估 {evaluator.evaluations} 次（硬上限 {int(max_evaluations)} 次），"
         f"远小于全网格评估次数。",
         "起始容量（种子）："
-        f"光伏 {current[0]:,.2f} kWp、储能 {current[1]:,.2f} kWh / {current[2]:,.2f} kW"
+        f"光伏 {seed_point[0]:,.2f} kWp、储能 {seed_point[1]:,.2f} kWh / "
+        f"{seed_point[2]:,.2f} kW"
         + ("（来自规则型建议）" if seed is None else "（调用方指定）")
-        + "。",
+        + "；",
+        "坐标下降终点："
+        f"光伏 {current[0]:,.2f} kWp、储能 {current[1]:,.2f} kWh / {current[2]:,.2f} kW。",
         "坐标下降轨迹：" + "；".join(evaluated_stages) + "。",
     ]
     if truncated:

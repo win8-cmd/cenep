@@ -28,6 +28,7 @@ from cenep.calculation.engine import calculation_engine
 from cenep.domain.enums import (
     DispatchStrategy,
     LoadProfileMode,
+    ProjectType,
     PVProfileMode,
     Resolution,
     TariffPeriod,
@@ -75,6 +76,21 @@ def axis_for(year: int = 2025):
     return _AXIS_CACHE[year]
 
 
+def derived_project_type(pv_kwp: float, storage_kwh: float) -> ProjectType:
+    """按容量显式判定项目类型（V2 §105；与 ``scenario_engine.normalize_project_type`` 同规则）。
+
+    光伏 > 0 且储能 > 0 → ``PV_STORAGE``；仅光伏 → ``COMMERCIAL_PV``；
+    仅储能 → ``COMMERCIAL_STORAGE``；两者皆 0 → ``COMMERCIAL_PV``（该组合没有对应类型）。
+    """
+    if pv_kwp > 0 and storage_kwh > 0:
+        return ProjectType.PV_STORAGE
+    if pv_kwp > 0:
+        return ProjectType.COMMERCIAL_PV
+    if storage_kwh > 0:
+        return ProjectType.COMMERCIAL_STORAGE
+    return ProjectType.COMMERCIAL_PV
+
+
 def build_project(
     *,
     pv_kwp: float = GOLDEN["pv_kwp"],
@@ -90,9 +106,23 @@ def build_project(
     demand_charge: float = 0.0,
     svc_soc_min: float = 0.10,
     svc_soc_max: float = 1.00,
+    project_type: ProjectType | None = None,
 ) -> Project:
-    """构造一个 V2 时序项目（默认即规范 §85 的 Golden Case）。"""
+    """构造一个 V2 时序项目（默认即规范 §85 的 Golden Case）。
+
+    :param project_type: 项目类型。``None``（默认）表示**按传入容量显式判定**
+        （见 :func:`derived_project_type`）。此前本 fixture 依赖 ``Project()`` 的默认值
+        ``COMMERCIAL_PV``，与"容量含 1000 kWh 储能"相矛盾——年度模型按无储能计算
+        （不计储能造价），时序仿真却按 1000 kWh 储能计算，导致 IRR / NPV 被高估
+        （V2 §105 口径不一致）。显式设置后两者口径一致；需要复现"用户忘记设置
+        项目类型"的场景时，显式传 ``ProjectType.COMMERCIAL_PV``。
+    """
     proj = Project()
+    proj.basic_info.project_type = (
+        project_type
+        if project_type is not None
+        else derived_project_type(pv_kwp, storage_kwh)
+    )
     proj.pv.pv_capacity_kwp = pv_kwp
     proj.pv.annual_degradation_rate = 0.0
     proj.storage.storage_power_kw = storage_kw

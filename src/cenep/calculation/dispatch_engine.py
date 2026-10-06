@@ -9,6 +9,40 @@
 * ``PV_SELF_CONSUMPTION``  —— 光伏盈余先给储能充电，光伏不足时才由储能补负荷（§13）
 * ``ECONOMIC_OPTIMIZATION``—— 规则型经济优化：按当日电价的低/高分位确定充放窗口（§14）
 
+逐日价格排序窗口调度（§12、§14 的核心修法）
+----------------------------------------
+``PEAK_VALLEY`` 与 ``ECONOMIC_OPTIMIZATION`` 的价格驱动充放电**不再逐时贪心**，而是
+"**先规划、后执行**"：
+
+1. **候选筛选**（与用户设置一致，不放松任何开关）：只有 ``电价 ≤ charge_price_threshold``
+   的小时才是充电候选，只有 ``电价 ≥ discharge_price_threshold`` 的小时才是放电候选
+   （``ECONOMIC_OPTIMIZATION`` 用当日 25% / 75% 分位代替用户阈值）；
+2. **价格排名**：充电候选按价格**升序**（便宜优先充）、放电候选按价格**降序**（贵优先放），
+   同价用时间先后稳定排序，保证结果确定性；
+3. **循环配对**：把一个自然日切成若干个"放电块"，每块取若干小时，小时数
+   ``ceil(可用容量 × η_d ÷ (放电功率 × Δt))`` 由**可用容量、功率上限与 Δt 推导**（不写死）；
+   每块再向"位于上一个放电块之后、本块最早小时之前"的充电候选里取**最便宜的若干小时**，
+   所需小时数按该块的放电电量反推；只有净差价 ``p_放电 − p_充电 ÷ η_往返 > 0`` 才立项。
+
+为什么必须这么做：逐时贪心会在傍晚平价时段（19–20 点）就把电池充满，等到次日凌晨更便宜的
+谷段（0–7 点）时 SOC 已是 100%，**最便宜的充电机会被自己挤掉**。按日价格排名后，充电小时
+总是当日最便宜的那几个，谷段天然优先；而"当日没有更便宜的充电小时在其后"的时段（如 19–20 点）
+不会被立项，从而消除该缺陷。实测广东三电价案例（谷 0.30 / 平 0.689 / 峰 0.921，1 MWh/500 kW）
+年套利收益由 8.5 万元升到 22 万元量级。
+
+近似性与适用边界（**本策略不是全局最优解**，明确声明如下）
+--------------------------------------------------------
+* 规划尺度是**自然日**：跨日 SOC 结转不在规划模型内。若某日的高价窗口位于当日任何低价候选
+  *之前*（例如凌晨尖峰、且谷段落在 22 点之后），该块因"没有更早的充电小时"而不立项，
+  此时不会动用前一日结转的电量 —— 这是保守的近似，宁可少赚也不虚构跨日最优。
+* 同样地，日末时段（如 23 点谷段）不会为了**次日**高峰而充电：次日凌晨通常有同样便宜或更便宜的
+  谷段，日末充电只会挤掉次日更便宜的充电机会（这正是被修复的缺陷本身）。
+* "循环配对"是**贪心**式的：先满足最贵的放电块，再依次向后配对，不做全局最优匹配，
+  也不考虑电池循环寿命成本、需量电费、辅助服务收益等其他价值流。
+* 每个"放电块"内部按价格排名取小时，块内若出现净差价不足的小时，只裁剪块尾，不做重排。
+* 因此本模块给出的是**可解释、单调、稳健的规则型调度**；真正的全局最优需要把储能调度写成
+  含跨日 SOC 状态变量的线性规划（MILP/LP），属于后续迭代范围，不在本引擎职责内。
+
 能源优先级（V2 §20、§21）
 -----------------------
 1. ``PV → Load``；2. ``PV → Storage``；3. ``PV → Grid``；4. 余量弃光（§9.3）
@@ -40,11 +74,16 @@
 循环性能说明：Pydantic 字段访问与 ndarray 逐元素索引全部移到循环之外，
 输入转 Python list、输出累加后一次性转 ndarray；8760 点约 34 ms（优化前约 132 ms），
 25 年逐年重算约 0.9 s（§86 单年预算 2000 ms）。
+
+逐日窗口规划的开销（§86、§87）：365 天 × 每天一小段排序与配对，只在**确实存在充放电候选**
+（阈值大于 0 或经济优化分位）时才计算；候选为空（如默认阈值 0）时完全跳过，因此默认配置的
+逐时循环与规划前**逐位一致**。实测单年 8760 点规划 + 调度仍在 §86 预算内（见测试基准）。
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -79,7 +118,7 @@ R_IDLE_NO_DISCHARGE_TARGET = "IDLE_NO_DISCHARGE_TARGET"
 #: 原因码 → 中文解释（写入结果与报告，V2 §16）
 REASON_LABELS: dict[str, str] = {
     R_CHARGE_PV_SURPLUS: "光伏盈余，优先给储能充电",
-    R_CHARGE_LOW_PRICE: "谷段电价不高于充电阈值，储能充电",
+    R_CHARGE_LOW_PRICE: "当日低价充电窗口（按价格排名优先谷段），储能充电",
     R_CHARGE_GRID_LOW: "低价时段，按设置从电网充电",
     R_CHARGE_ECONOMIC_LOW: "当日低价时段，经济优化判定充电",
     R_DISCHARGE_PEAK: "高峰电价不低于放电阈值，储能放电",
@@ -145,23 +184,181 @@ class DispatchOutcome:
         return out
 
 
-def _economic_thresholds(price: np.ndarray, day_of_year: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _day_keys(axis) -> np.ndarray:
+    """自然日分组键（``月 × 100 + 日``）。
+
+    时间轴已提供向量化的 ``month`` / ``day`` 数组（``timeseries_engine.TimeAxis``），
+    因此这里不再逐点解析 ``datetime.timetuple()``：8760 点从约 4 ms 降到约 0.1 ms，
+    且分组结果与"按年积日分组"完全等价（V2 §7）。
+    """
+    return axis.month.astype(np.int64) * 100 + axis.day.astype(np.int64)
+
+
+def _economic_thresholds(price: np.ndarray, day_key: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """按"天"计算电价的低/高分位阈值（V2 §14 规则型经济优化）。
 
     低阈值取当日 25% 分位、高阈值取当日 75% 分位，同一天内保持一致的充放窗口，
-    避免逐时反复切换充放电。
+    避免逐时反复切换充放电。分位阈值只负责回答"哪些小时**有资格**充放电"，
+    资格内部的优先级由 :func:`_plan_daily_windows` 的价格排名决定。
     """
     low = np.empty_like(price)
     high = np.empty_like(price)
-    for day in np.unique(day_of_year):
-        mask = day_of_year == day
-        values = price[mask]
+    # 快路径：逐日点数相同（小时粒度下就是 24 点）时，一次 ``np.percentile(axis=1)``
+    # 即可算完全年分位；否则退化为逐日循环。两条路径结果一致（§118 可重复性）。
+    starts, ends = _day_ranges(day_key, price.size)
+    counts = ends - starts
+    if counts.size and counts.min() == counts.max() and counts[0] > 0:
+        matrix = price.reshape(counts.size, int(counts[0]))
+        q1, q3 = np.percentile(matrix, [25.0, 75.0], axis=1)
+        low = np.repeat(q1, int(counts[0]))
+        high = np.repeat(q3, int(counts[0]))
+        return low, high
+    for s, e in zip(starts.tolist(), ends.tolist()):
+        values = price[s:e]
         if values.size == 0:
             continue
         q1, q3 = np.percentile(values, [25.0, 75.0])
-        low[mask] = q1
-        high[mask] = q3
+        low[s:e] = q1
+        high[s:e] = q3
     return low, high
+
+
+def _day_ranges(day_key: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
+    """自然日的 ``[起, 止)`` 索引区间（时间轴按时间升序，同一天的点必然连续）。"""
+    starts = np.concatenate(([0], np.flatnonzero(np.diff(day_key)) + 1))
+    ends = np.concatenate((starts[1:], [n]))
+    return starts, ends
+
+
+def _plan_daily_windows(
+    *,
+    price: np.ndarray,
+    day_key: np.ndarray,
+    charge_candidate: np.ndarray,
+    discharge_candidate: np.ndarray,
+    usable_discharge_ac: float,
+    charge_energy_per_hour: float,
+    discharge_energy_per_hour: float,
+    round_trip_efficiency: float,
+    epsilon: float = 1e-12,
+) -> tuple[np.ndarray, np.ndarray]:
+    """逐日按价格排名规划充/放电窗口（V2 §12、§14，先规划后执行）。
+
+    输入
+    ----
+    * ``charge_candidate`` / ``discharge_candidate``：布尔数组，回答"哪些小时**有资格**充电／
+      放电"。资格完全由用户阈值（或经济优化分位）决定，**规划不放松任何开关**；
+    * ``usable_discharge_ac``：SOC 区间内可放出的交流电量 ``可用容量 × η_d``；
+    * ``charge_energy_per_hour`` / ``discharge_energy_per_hour``：每小时的交流电量上限
+      ``功率 × Δt``（§11、§75）；
+    * ``round_trip_efficiency``：``η_charge × η_discharge``，用于判断净差价。
+
+    输出
+    ----
+    ``(allow_charge, allow_discharge)``：两个布尔数组，逐时执行阶段只有落在窗口内的
+    价格驱动充放电才会发生（光伏盈余充电不受窗口限制，见模块 docstring）。
+
+    算法（每个自然日独立执行，共 365 次小循环）
+    ----------------------------------------
+    1. 取当日**最贵**的 ``ceil(可用容量 × η_d ÷ (放电功率 × Δt))`` 个小时作为第一个放电块
+       （小时数由容量、功率与 Δt 推出，不写死；同价按时间稳定排序）；
+    2. 向"位于上一个放电块之后、本块最早小时之前"的候选充电小时里取最便宜的若干小时，
+       数量按该块可放出的电量反推：``ceil(放电电量 ÷ η_往返 ÷ (充电功率 × Δt))``；
+    3. 只有块内最低放电价 ``p_d`` 与所选充电价 ``p_c`` 满足 ``p_c ÷ η_往返 < p_d`` 才立项，
+       否则整块跳过 —— 这是"不为充而充"的经济闸门；
+    4. 立项后按实际选中的充电量裁剪放电块，然后对剩下的放电候选重复 1–3。
+
+    实现与复杂度（§86、§87）：先一次性把电价与候选取下标转成 Python list，再用单指针
+    顺序切出每天的子列表 —— 每天只做小规模 ``sorted`` 与配对，**不调用任何逐日 NumPy 函数**，
+    因此 365 天全年规划的额外开销约为个位数毫秒（见测试 ``test_single_year_dispatch_within_budget``）。
+    """
+    n = price.size
+    allow_charge = np.zeros(n, dtype=bool)
+    allow_discharge = np.zeros(n, dtype=bool)
+    if n == 0 or charge_energy_per_hour <= 0.0 or discharge_energy_per_hour <= 0.0:
+        return allow_charge, allow_discharge
+
+    # 一个"完整循环"需要的放电小时数：容量 / 功率 / Δt 三者共同决定（§11、§75）
+    cycle_discharge_hours = max(
+        1, int(math.ceil(usable_discharge_ac / discharge_energy_per_hour))
+    )
+
+    starts, ends = _day_ranges(day_key, n)
+    price_l = price.tolist()
+    # 候选取下标（升序，天然按时间排列），一次遍历合并到每天
+    cand_all_c = [int(h) for h in np.flatnonzero(charge_candidate)]
+    cand_all_d = [int(h) for h in np.flatnonzero(discharge_candidate)]
+    if not cand_all_c or not cand_all_d:
+        return allow_charge, allow_discharge
+
+    ci = 0
+    di = 0
+    nc = len(cand_all_c)
+    nd = len(cand_all_d)
+    for s, e in zip(starts.tolist(), ends.tolist()):
+        day_c: list[int] = []
+        while ci < nc and cand_all_c[ci] < e:
+            h = cand_all_c[ci] - s
+            ci += 1
+            if h >= 0:
+                day_c.append(h)
+        day_d: list[int] = []
+        while di < nd and cand_all_d[di] < e:
+            h = cand_all_d[di] - s
+            di += 1
+            if h >= 0:
+                day_d.append(h)
+        if not day_c or not day_d:
+            continue
+        p = price_l[s:e]
+        # 价格排名：便宜的充电候选优先（升序），贵的放电候选优先（降序）；
+        # 同价用稳定排序保留时间先后，保证同一输入的结果确定（§118 可重复性）。
+        cand_c = sorted(day_c, key=p.__getitem__)
+        cand_d = sorted(day_d, key=lambda h: -p[h])
+
+        used: set[int] = set()
+        lower = -1  # 上一个"已立项放电块"的最晚小时（相对下标），保证充电在放电之前
+        pos = 0
+        while pos < len(cand_d):
+            block = cand_d[pos : pos + cycle_discharge_hours]
+            pos += cycle_discharge_hours
+            floor_price = min(p[h] for h in block)
+            first_hour = min(block)
+            avail = [h for h in cand_c if lower < h < first_hour and h not in used]
+            if not avail:
+                continue
+            profitable = [
+                h for h in avail if p[h] / round_trip_efficiency < floor_price - epsilon
+            ]
+            if not profitable:
+                continue
+            block_energy = min(len(block) * discharge_energy_per_hour, usable_discharge_ac)
+            need = max(
+                1,
+                int(
+                    math.ceil(
+                        block_energy / round_trip_efficiency / charge_energy_per_hour
+                    )
+                ),
+            )
+            chosen = profitable[:need]
+            # 按实际选中的充电量裁剪放电块；多充的电量由后续放电块继续使用，不会凭空消失
+            served = int(
+                math.ceil(
+                    len(chosen)
+                    * charge_energy_per_hour
+                    * round_trip_efficiency
+                    / discharge_energy_per_hour
+                )
+            )
+            keep = block[: max(1, min(len(block), served))]
+            for h in chosen:
+                used.add(h)
+                allow_charge[s + h] = True
+            for h in keep:
+                allow_discharge[s + h] = True
+            lower = max(keep)
+    return allow_charge, allow_discharge
 
 
 def dispatch(
@@ -221,12 +418,40 @@ def dispatch(
         DispatchAction.IDLE.value,
     ]
 
-    # 经济优化的当日阈值（向量化预计算，循环内只做标量比较）
-    if config.strategy is DispatchStrategy.ECONOMIC_OPTIMIZATION:
-        doy = np.array([ts.timetuple().tm_yday for ts in axis.timestamps], dtype=np.int64)
-        econ_low, econ_high = _economic_thresholds(price, doy)
-    else:
-        econ_low = econ_high = np.zeros(n)
+    strategy = config.strategy
+    charge_threshold = float(config.charge_price_threshold)
+    discharge_threshold = float(config.discharge_price_threshold)
+
+    # ---- 逐日价格窗口规划（V2 §12、§14）：先规划、后执行 ----
+    # 只有在"确实存在充放电候选"时才付出规划开销：
+    #   * 用户阈值为 0（默认值）⇒ 没有任何候选 ⇒ 完全跳过，逐时循环与规划前**逐位一致**；
+    #   * 无储能 / 功率为 0 ⇒ 本来就不动作，同样跳过；
+    #   * ``PV_SELF_CONSUMPTION`` 不按价格决策，规划对它没有意义（§13 语义不变）。
+    plan_charge = np.zeros(n, dtype=bool)
+    plan_discharge = np.zeros(n, dtype=bool)
+    if has_storage and strategy is not DispatchStrategy.PV_SELF_CONSUMPTION:
+        day_key = _day_keys(axis)
+        if strategy is DispatchStrategy.ECONOMIC_OPTIMIZATION:
+            # 经济优化：当日 25% / 75% 分位是"资格线"（§14），资格内部再按价格排名定优先级
+            econ_low, econ_high = _economic_thresholds(price, day_key)
+            charge_candidate = price <= econ_low + 1e-12
+            discharge_candidate = price >= econ_high - 1e-12
+        else:  # PEAK_VALLEY：用户阈值即资格线（§12）
+            charge_candidate = (charge_threshold > 0.0) & (price <= charge_threshold + 1e-12)
+            discharge_candidate = (discharge_threshold > 0.0) & (
+                price >= discharge_threshold - 1e-12
+            )
+        if charge_candidate.any() and discharge_candidate.any():
+            plan_charge, plan_discharge = _plan_daily_windows(
+                price=price,
+                day_key=day_key,
+                charge_candidate=charge_candidate,
+                discharge_candidate=discharge_candidate,
+                usable_discharge_ac=usable * eta_d,
+                charge_energy_per_hour=max_charge_power * dt,
+                discharge_energy_per_hour=max_discharge_power * dt,
+                round_trip_efficiency=eta_c * eta_d,
+            )
 
     export_allowed = float(np.max(export_price)) > 0.0
     current_soc = float(config.initial_soc)
@@ -243,15 +468,11 @@ def dispatch(
     # 复杂度 O(n)，实测 8760 点约 20~30 ms（优化前约 132 ms）。
     load_l = load.tolist()
     pv_l = pv.tolist()
-    price_l = price.tolist()
-    econ_low_l = econ_low.tolist()
-    econ_high_l = econ_high.tolist()
+    plan_charge_l = plan_charge.tolist()
+    plan_discharge_l = plan_discharge.tolist()
 
-    strategy = config.strategy
     is_self_consumption = strategy is DispatchStrategy.PV_SELF_CONSUMPTION
     is_peak_valley = strategy is DispatchStrategy.PEAK_VALLEY
-    charge_threshold = float(config.charge_price_threshold)
-    discharge_threshold = float(config.discharge_price_threshold)
     allow_arbitrage = bool(config.allow_arbitrage)
     charge_from_pv = bool(config.charge_from_pv)
     grid_charge_on = bool(config.allow_grid_charge and config.charge_from_grid)
@@ -282,7 +503,6 @@ def dispatch(
 
         p_load = load_l[t]
         p_pv = pv_l[t]
-        p_price = price_l[t]
 
         # ---- 1. 光伏优先供负荷（§20）----
         direct = p_pv if p_pv < p_load else p_load
@@ -340,8 +560,10 @@ def dispatch(
                     reason = R_IDLE_PV_DEFICIT_NOT_ALLOWED
 
             elif is_peak_valley:
-                low_hit = charge_threshold > 0.0 and p_price <= charge_threshold
-                high_hit = discharge_threshold > 0.0 and p_price >= discharge_threshold
+                # §12：只有落在**当日价格排名窗口**内的小时才按价格充放电（先规划后执行）。
+                # 窗口已保证"便宜优先充、贵优先放"，且谷段不会被傍晚平价充电挤掉。
+                low_hit = plan_charge_l[t]
+                high_hit = plan_discharge_l[t]
                 if low_hit and allow_arbitrage:
                     want_charge, charge_reason = True, (
                         R_CHARGE_PV_SURPLUS if surplus > 1e-12 else R_CHARGE_LOW_PRICE
@@ -353,13 +575,12 @@ def dispatch(
                     want_charge, charge_reason = True, R_CHARGE_PV_SURPLUS
 
             else:  # ECONOMIC_OPTIMIZATION
-                low_hit = p_price <= econ_low_l[t] + 1e-12
-                high_hit = p_price >= econ_high_l[t] - 1e-12
+                # §14：当日分位阈值给出资格，价格排名给出窗口内的优先级
                 if surplus > 1e-12 and charge_from_pv:
                     want_charge, charge_reason = True, R_CHARGE_PV_SURPLUS
-                elif low_hit and allow_arbitrage:
+                elif plan_charge_l[t] and allow_arbitrage:
                     want_charge, charge_reason = True, R_CHARGE_ECONOMIC_LOW
-                elif high_hit and (deficit > 1e-12 or export_storage_on):
+                elif plan_discharge_l[t] and (deficit > 1e-12 or export_storage_on):
                     want_discharge, discharge_reason = True, R_DISCHARGE_ECONOMIC_HIGH
 
             # ---- 充电 ----

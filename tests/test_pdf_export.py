@@ -41,11 +41,16 @@ def exported(golden_pv_storage, tmp_path: Path):
 
 
 class TestReportStructure:
-    def test_fifteen_sections_declared(self):
-        """§110：报告结构固定 15 章。"""
-        assert len(REPORT_SECTIONS) == 15
-        assert REPORT_SECTIONS[0] == "封面"
-        assert REPORT_SECTIONS[-1] == "测算说明"
+    def test_sixteen_sections_declared(self):
+        """V2 §66：报告结构由 V1 §110 的 15 章重组为 16 部分。"""
+        assert len(REPORT_SECTIONS) == 16
+        assert REPORT_SECTIONS[0] == "项目概况"
+        assert REPORT_SECTIONS[-1] == "免责声明"
+
+    def test_v2_sections_declared(self):
+        """V2 §66 新增的 6 个时序章节必须出现在清单中。"""
+        for name in ("负荷分析", "PV时序分析", "储能SOC分析", "能源流", "电费分析", "储能收益"):
+            assert name in REPORT_SECTIONS, f"缺少 V2 §66 要求的章节：{name}"
 
     def test_all_sections_present_in_story(self, golden_pv_storage):
         result = calculation_engine.calculate(golden_pv_storage)

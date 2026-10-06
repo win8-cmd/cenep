@@ -39,10 +39,12 @@ def window(qapp, tmp_path: Path):
 
 
 class TestWindowStructure:
-    def test_seven_tabs(self, window):
-        """§97：主界面必须包含 项目/参数/计算/结果/敏感性/报告/设置。"""
+    def test_eight_tabs(self, window):
+        """§97 + V2 §5：主界面包含 项目/参数/计算/结果/时序仿真/敏感性/报告/设置。"""
         titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert titles == ["项目", "参数", "计算", "结果", "敏感性", "报告", "设置"]
+        assert titles == [
+            "项目", "参数", "计算", "结果", "时序仿真", "敏感性", "报告", "设置",
+        ]
 
     def test_parameter_tabs(self, window):
         titles = [window.parameters_page.tabs.tabText(i) for i in range(window.parameters_page.tabs.count())]

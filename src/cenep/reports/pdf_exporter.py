@@ -22,6 +22,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.graphics.shapes import Drawing, Line, PolyLine, Rect, String
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
@@ -41,23 +42,26 @@ from ..infrastructure.logging_setup import get_logger
 
 logger = get_logger()
 
-#: 报告章节顺序（规范 §110）
+#: 报告章节顺序。V2 §66 将 V1 §110 的 15 章重组为 **16 部分**：
+#: V1 的「测算条件/技术参数/电价参数」并入「输入参数」，「运营成本」并入「现金流」，
+#: 「收益测算」并入「经济指标」，「政策依据」并入「参数来源」，并新增 6 个时序章节。
 REPORT_SECTIONS = [
-    "封面",
     "项目概况",
-    "测算条件",
-    "技术参数",
-    "电价参数",
-    "投资估算",
-    "运营成本",
-    "收益测算",
+    "输入参数",
+    "负荷分析",
+    "PV时序分析",
+    "储能SOC分析",
+    "能源流",
+    "电费分析",
+    "储能收益",
+    "投资",
     "现金流",
     "经济指标",
-    "敏感性分析",
-    "情景分析",
-    "风险提示",
-    "政策依据",
-    "测算说明",
+    "方案比较",
+    "敏感性",
+    "风险",
+    "参数来源",
+    "免责声明",
 ]
 
 #: 免责声明（规范 §111，必须逐字出现）
@@ -103,6 +107,125 @@ def register_cjk_font() -> str:
     except Exception:  # pragma: no cover
         _FONT_NAME = "Helvetica"
     return _FONT_NAME
+
+
+# --------------------------------------------------------------------------- #
+# V2 图表（V2 §66；用 reportlab.graphics 直接绘制，不引入新依赖）
+#
+# 设计约束：只画**抽样**数据（典型日 24 点、12 个月），不把 8760 点画进报告，
+# 否则 PDF 体积与渲染时间都会失控。图表数据一律取自 CalculationResult。
+# --------------------------------------------------------------------------- #
+_CHART_FRAME = "#BFBFBF"
+
+
+def _chart_lines(
+    title: str,
+    categories: list[str],
+    series: list[tuple[str, list[float], str]],
+    width: float = 460.0,
+    height: float = 180.0,
+) -> Drawing:
+    """折线图：多序列共用横轴，用于典型日曲线与 SOC 曲线。"""
+    d = Drawing(width, height)
+    left, right, top, bottom = 46.0, 8.0, 26.0, 24.0
+    plot_w = max(width - left - right, 10.0)
+    plot_h = max(height - top - bottom, 10.0)
+    d.add(
+        Rect(
+            left,
+            bottom,
+            plot_w,
+            plot_h,
+            strokeColor=colors.HexColor(_CHART_FRAME),
+            fillColor=None,
+        )
+    )
+    d.add(String(left, height - 13, title, fontSize=8))
+
+    all_values = [v for _label, values, _color in series for v in values] or [0.0]
+    vmax = max(all_values) if max(all_values) > 0 else 1.0
+    n = max(len(categories), 1)
+    step = max(n - 1, 1)
+
+    for _label, values, color in series:
+        points: list[float] = []
+        for i, value in enumerate(values[:n]):
+            points.append(left + plot_w * i / step)
+            points.append(bottom + plot_h * max(min(value / vmax, 1.0), 0.0))
+        if len(points) >= 4:
+            d.add(PolyLine(points, strokeColor=colors.HexColor(color), strokeWidth=0.9))
+
+    for i in range(0, n, 4):
+        if i < len(categories):
+            d.add(String(left + plot_w * i / step - 4, bottom - 11, categories[i], fontSize=6))
+    d.add(String(2, bottom + plot_h - 7, f"{vmax:,.0f}", fontSize=6))
+    d.add(String(2, bottom - 2, "0", fontSize=6))
+
+    legend_x = left + 4
+    for label, _values, color in series:
+        d.add(
+            Line(
+                legend_x,
+                height - 20,
+                legend_x + 10,
+                height - 20,
+                strokeColor=colors.HexColor(color),
+                strokeWidth=1.6,
+            )
+        )
+        d.add(String(legend_x + 13, height - 23, label, fontSize=7))
+        legend_x += 13 + 12 * len(label) + 16
+    return d
+
+
+def _chart_bars(
+    title: str,
+    categories: list[str],
+    values: list[float],
+    width: float = 460.0,
+    height: float = 165.0,
+    color: str = "#4472C4",
+) -> Drawing:
+    """柱状图：单序列，用于逐月电量。"""
+    d = Drawing(width, height)
+    left, right, top, bottom = 46.0, 8.0, 26.0, 24.0
+    plot_w = max(width - left - right, 10.0)
+    plot_h = max(height - top - bottom, 10.0)
+    d.add(
+        Rect(
+            left,
+            bottom,
+            plot_w,
+            plot_h,
+            strokeColor=colors.HexColor(_CHART_FRAME),
+            fillColor=None,
+        )
+    )
+    d.add(String(left, height - 13, title, fontSize=8))
+
+    vmax = max(values) if values and max(values) > 0 else 1.0
+    n = max(len(values), 1)
+    slot = plot_w / n
+    bar_w = slot * 0.6
+    for i, value in enumerate(values):
+        bar_h = plot_h * max(min(value / vmax, 1.0), 0.0)
+        x = left + slot * i + (slot - bar_w) / 2
+        d.add(
+            Rect(
+                x,
+                bottom,
+                bar_w,
+                bar_h,
+                strokeColor=None,
+                fillColor=colors.HexColor(color),
+            )
+        )
+    for i in range(n):
+        if i < len(categories):
+            d.add(String(left + slot * i + slot * 0.28, bottom - 11, categories[i], fontSize=6))
+    d.add(String(2, bottom + plot_h - 7, f"{vmax:,.0f}", fontSize=6))
+    d.add(String(2, bottom - 2, "0", fontSize=6))
+    return d
 
 
 @dataclass
@@ -152,7 +275,7 @@ class PdfExporter:
         """构造 reportlab 文档流；拆出来便于测试与复用。"""
         story: list = []
 
-        # ---------- 1. 封面 ----------
+        # ---------- 封面 ----------
         story.append(Spacer(1, 40 * mm))
         story.append(Paragraph("工商业新能源项目经济评价报告", styles["title"]))
         story.append(Spacer(1, 10 * mm))
@@ -175,7 +298,8 @@ class PdfExporter:
         story.append(Paragraph(DISCLAIMER_2, styles["small"]))
         story.append(PageBreak())
 
-        # ---------- 2. 项目概况 ----------
+
+        # ---------- 一、项目概况 ----------
         story.append(Paragraph("一、项目概况", styles["h1"]))
         story.append(
             self._table(
@@ -197,8 +321,9 @@ class PdfExporter:
             )
         )
 
-        # ---------- 3. 测算条件 ----------
-        story.append(Paragraph("二、测算条件", styles["h1"]))
+
+        # ---------- 二、输入参数 ----------
+        story.append(Paragraph("二、输入参数", styles["h1"]))
         story.append(
             self._table(
                 ["项目", "取值"],
@@ -213,8 +338,9 @@ class PdfExporter:
             )
         )
 
-        # ---------- 4. 技术参数 ----------
-        story.append(Paragraph("三、技术参数", styles["h1"]))
+
+        # ---------- 输入参数·技术 ----------
+        story.append(Paragraph("（一）技术参数", styles["h2"]))
         p, s = project.pv, project.storage
         story.append(
             self._table(
@@ -238,8 +364,9 @@ class PdfExporter:
             )
         )
 
-        # ---------- 5. 电价参数 ----------
-        story.append(Paragraph("四、电价参数", styles["h1"]))
+
+        # ---------- 输入参数·电价 ----------
+        story.append(Paragraph("（二）电价参数", styles["h2"]))
         t = project.tariff
         story.append(
             self._table(
@@ -256,8 +383,206 @@ class PdfExporter:
             )
         )
 
-        # ---------- 6. 投资估算 ----------
-        story.append(Paragraph("五、投资估算", styles["h1"]))
+
+        # ---------- V2 时序章节（三~八）----------
+        # ================= V2 时序章节（三~八，V2 §66）=================
+        # 无时序结果时每章仍须出现并给出说明，保证 V1 项目导出的报告结构完整。
+        ts = result.time_series_results
+        has_ts = ts is not None and ts.hourly is not None and len(ts.hourly) > 0
+        _NO_TS = (
+            "本项目未启用时序仿真，本章无数据。启用方法：在「参数 → 时序仿真」中打开开关，"
+            "填写负荷曲线、光伏曲线与分时电价三条曲线后重新计算。"
+        )
+        _summer = (
+            [i for i, t in enumerate(ts.hourly.timestamps) if t.month == 7 and t.day == 15]
+            if has_ts
+            else []
+        )
+        _hours = [f"{h:02d}" for h in range(24)]
+
+        # ---------- 三、负荷分析 ----------
+        story.append(Paragraph("三、负荷分析", styles["h1"]))
+        if not has_ts:
+            story.append(Paragraph(_NO_TS, styles["body"]))
+        else:
+            load = ts.hourly.column("load")
+            row_lp = [
+                ["年用电量（kWh）", _fmt_energy(float(sum(load)))],
+                ["最大负荷（kW）", _fmt_num(max(load))],
+                ["最小负荷（kW）", _fmt_num(min(load))],
+                ["平均负荷（kW）", _fmt_num(float(sum(load)) / max(len(load), 1))],
+                ["逐时点数", f"{len(load):,}（{ts.resolution.label}）"],
+                ["取得方式", project.timeseries.load.mode.label],
+                ["年负荷增长率", _fmt_pct(project.timeseries.load.annual_growth_rate)],
+            ]
+            story.append(self._table(["项目", "取值"], row_lp, styles, right_align={1}))
+            if _summer:
+                series = [
+                    ("负荷", [float(load[i]) for i in _summer], "#C00000"),
+                    ("光伏", [float(ts.hourly.column("pv_generation")[i]) for i in _summer], "#2E75B6"),
+                ]
+                story.append(Spacer(1, 3 * mm))
+                story.append(_chart_lines("图 1  典型日（7 月 15 日）负荷与光伏出力", _hours, series))
+
+        # ---------- 四、PV时序分析 ----------
+        story.append(Paragraph("四、PV时序分析", styles["h1"]))
+        if not has_ts:
+            story.append(Paragraph(_NO_TS, styles["body"]))
+        else:
+            pv = ts.hourly.column("pv_generation")
+            cap = result.pv_capacity_kwp or 0.0
+            total_pv = float(sum(pv))
+            row_pv = [
+                ["年发电量（kWh）", _fmt_energy(total_pv)],
+                ["等效利用小时（h）", _fmt_num(total_pv / cap if cap > 0 else 0.0)],
+                ["最大出力（kW）", _fmt_num(max(pv))],
+                ["弃光电量（kWh）", _fmt_energy(ts.metrics.annual_pv_curtailment)],
+                ["自用率（V2 §22）", _fmt_pct(ts.metrics.self_consumption_rate)],
+                ["自给率（V2 §23）", _fmt_pct(ts.metrics.self_sufficiency_rate)],
+            ]
+            story.append(self._table(["项目", "取值"], row_pv, styles, right_align={1}))
+            months = [t.month for t in ts.hourly.timestamps]
+            monthly = [
+                float(sum(pv[i] for i in range(len(pv)) if months[i] == m)) for m in range(1, 13)
+            ]
+            story.append(Spacer(1, 3 * mm))
+            story.append(
+                _chart_bars(
+                    "图 2  逐月上网电量（kWh）",
+                    [f"{m}月" for m in range(1, 13)],
+                    [
+                        float(
+                            sum(
+                                ts.hourly.column("grid_export")[i]
+                                for i in range(len(pv))
+                                if months[i] == m
+                            )
+                        )
+                        for m in range(1, 13)
+                    ],
+                )
+            )
+
+        # ---------- 五、储能SOC分析 ----------
+        story.append(Paragraph("五、储能SOC分析", styles["h1"]))
+        # 判据用「仿真中是否真的充放过电」而不是 result.storage_energy_kwh：
+        # 当项目类型为 COMMERCIAL_PV（has_storage=False）但配置了储能时，
+        # 引擎的年度模型不认储能，result.storage_* 会是 0，而 V2 时序仿真实际用了储能。
+        _st_charge = ts.metrics.annual_storage_charge if has_ts else 0.0
+        _st_discharge = ts.metrics.annual_storage_discharge if has_ts else 0.0
+        _cap = float(project.storage.storage_energy_kwh) or float(result.storage_energy_kwh or 0.0)
+        _power = float(project.storage.storage_power_kw) or float(result.storage_power_kw or 0.0)
+        if not has_ts:
+            story.append(Paragraph(_NO_TS, styles["body"]))
+        elif _cap <= 0.0 and (_st_charge + _st_discharge) <= 0.0:
+            story.append(Paragraph("本项目未配置储能，无 SOC 数据。", styles["body"]))
+        else:
+            soc = ts.hourly.column("storage_soc_end")
+            row_soc = [
+                ["储能容量（kWh）", _fmt_num(_cap)],
+                ["储能功率（kW）", _fmt_num(_power)],
+                ["SOC 下限 / 上限", f"{_fmt_pct(project.timeseries.dispatch.soc_min)} / {_fmt_pct(project.timeseries.dispatch.soc_max)}"],
+                ["SOC 实际最低 / 最高", f"{_fmt_pct(min(soc))} / {_fmt_pct(max(soc))}"],
+                ["年充电量（kWh）", _fmt_energy(ts.metrics.annual_storage_charge)],
+                ["年放电量（kWh）", _fmt_energy(ts.metrics.annual_storage_discharge)],
+                ["其中电网充电（kWh）", _fmt_energy(ts.metrics.annual_grid_charge)],
+                ["等效循环次数（实际 / 配置）", f"{_fmt_num(ts.metrics.equivalent_cycles)} / {_fmt_num(ts.metrics.configured_cycles)}"],
+                ["调度策略", ts.dispatch_strategy.label],
+            ]
+            story.append(self._table(["项目", "取值"], row_soc, styles, right_align={1}))
+            if _summer:
+                story.append(Spacer(1, 3 * mm))
+                story.append(
+                    _chart_lines(
+                        "图 3  典型日（7 月 15 日）储能 SOC 曲线",
+                        _hours,
+                        [("SOC", [float(soc[i]) * 100.0 for i in _summer], "#548235")],
+                    )
+                )
+
+        # ---------- 六、能源流 ----------
+        story.append(Paragraph("六、能源流", styles["h1"]))
+        bal = result.energy_balance
+        if bal is None:
+            story.append(Paragraph(_NO_TS, styles["body"]))
+        else:
+            row_flow = [
+                ["光伏发电（kWh）", _fmt_energy(bal.pv_generation)],
+                ["　→ 直接供负荷", _fmt_energy(bal.pv_to_load)],
+                ["　→ 给储能充电", _fmt_energy(bal.pv_to_storage)],
+                ["　→ 上网", _fmt_energy(bal.pv_to_grid)],
+                ["　→ 弃光", _fmt_energy(bal.pv_curtailed)],
+                ["电网购电（kWh）", _fmt_energy(bal.grid_import)],
+                ["　→ 供负荷", _fmt_energy(bal.grid_to_load)],
+                ["　→ 给储能充电", _fmt_energy(bal.grid_to_storage)],
+                ["储能放电（kWh）", _fmt_energy(bal.storage_discharge)],
+                ["负荷（kWh）", _fmt_energy(bal.load_total)],
+                ["上网电量（kWh）", _fmt_energy(bal.grid_export)],
+                ["供给合计（kWh）", _fmt_energy(bal.supply_total)],
+                ["需求合计（kWh）", _fmt_energy(bal.demand_total)],
+                ["平衡误差（kWh）", f"{bal.error:.3e}"],
+                ["容差（kWh）", f"{bal.tolerance:.1e}"],
+                ["是否平衡（V2 §19）", "是" if bal.is_balanced else "否"],
+            ]
+            story.append(self._table(["能源流项目", "数值"], row_flow, styles, right_align={1}))
+
+        # ---------- 七、电费分析 ----------
+        story.append(Paragraph("七、电费分析", styles["h1"]))
+        if not has_ts:
+            story.append(Paragraph(_NO_TS, styles["body"]))
+        else:
+            m = ts.metrics
+            row_fee = [
+                ["基准电费（元）", _fmt_money(m.baseline_electricity_cost)],
+                ["实际电费（元）", _fmt_money(m.actual_electricity_cost)],
+                ["电费节省（元）", _fmt_money(m.electricity_cost_saving)],
+                ["　其中：光伏自用节省（元）", _fmt_money(m.pv_self_consumption_saving)],
+                ["　其中：储能套利收益（元）", _fmt_money(m.storage_arbitrage_revenue)],
+                ["基准需量电费（元）", _fmt_money(m.baseline_demand_cost)],
+                ["实际需量电费（元）", _fmt_money(m.actual_demand_cost)],
+                ["需量电费节省（元）", _fmt_money(m.demand_cost_saving)],
+                ["最大需量 削减前 / 后（kW）", f"{_fmt_num(m.peak_demand_before)} / {_fmt_num(m.peak_demand_after)}"],
+            ]
+            story.append(self._table(["项目", "金额"], row_fee, styles, right_align={1}))
+            story.append(Spacer(1, 2 * mm))
+            story.append(
+                Paragraph(
+                    "口径说明：电费节省按现金口径计算（Σ 负荷×电价 − Σ 购电×电价）；"
+                    "其分解项之和与之严格相等（光伏自用节省 + 储能套利收益），"
+                    "其中光伏给储能充电的电量按 0 计价，避免与自用节省重复计算（V2 §28、§29）。",
+                    styles["small"],
+                )
+            )
+
+        # ---------- 八、储能收益 ----------
+        story.append(Paragraph("八、储能收益", styles["h1"]))
+        if not has_ts:
+            story.append(Paragraph(_NO_TS, styles["body"]))
+        else:
+            m = ts.metrics
+            row_st = [
+                ["储能套利收益（元）", _fmt_money(m.storage_arbitrage_revenue)],
+                ["储能容量收益（元）", _fmt_money(m.storage_capacity_revenue)],
+                ["储能辅助服务收益（元）", _fmt_money(m.storage_ancillary_revenue)],
+                ["其他收益（元）", _fmt_money(m.other_revenue)],
+                ["储能收益合计（元）", _fmt_money(m.storage_arbitrage_revenue + m.storage_capacity_revenue + m.storage_ancillary_revenue + m.other_revenue)],
+                ["等效循环次数（V2 §24）", _fmt_num(m.equivalent_cycles)],
+                ["光伏上网收入（元）", _fmt_money(m.pv_export_revenue)],
+                ["首年收益合计（元）", _fmt_money(m.total_benefit)],
+            ]
+            story.append(self._table(["项目", "金额"], row_st, styles, right_align={1}))
+            story.append(Spacer(1, 2 * mm))
+            story.append(
+                Paragraph(
+                    "套利收益按逐时实际充放电计算：Σ(放电量×替代电价 − 充电量×充电电价)，"
+                    "不使用「放电量 × 峰谷价差」的简化口径（V2 §29）。",
+                    styles["small"],
+                )
+            )
+
+
+        # ---------- 九、投资 ----------
+        story.append(Paragraph("九、投资", styles["h1"]))
         story.append(
             self._table(
                 ["投资项", "金额（元）"],
@@ -275,8 +600,11 @@ class PdfExporter:
             )
         )
 
-        # ---------- 7. 运营成本 ----------
-        story.append(Paragraph("六、运营成本", styles["h1"]))
+
+        # ---------- 十、现金流 ----------
+        story.append(Paragraph("十、现金流", styles["h1"]))
+
+        story.append(Paragraph("（一）运营成本", styles["h2"]))
         first = result.annual_results[0] if result.annual_results else None
         story.append(
             self._table(
@@ -302,28 +630,9 @@ class PdfExporter:
             )
         )
 
-        # ---------- 8. 收益测算 ----------
-        story.append(Paragraph("七、收益测算", styles["h1"]))
-        story.append(
-            self._table(
-                ["收益项", "首年金额（元）"],
-                [
-                    ["光伏自用收益", _fmt_money(first.pv_self_use_revenue if first else 0.0)],
-                    ["光伏上网收益", _fmt_money(first.pv_export_revenue if first else 0.0)],
-                    ["储能套利收益", _fmt_money(first.storage_arbitrage_revenue if first else 0.0)],
-                    ["储能容量收益", _fmt_money(first.storage_capacity_revenue if first else 0.0)],
-                    ["储能辅助服务收益", _fmt_money(first.storage_ancillary_revenue if first else 0.0)],
-                    ["储能其他收益", _fmt_money(first.storage_other_revenue if first else 0.0)],
-                    ["首年收入合计", _fmt_money(result.first_year_revenue)],
-                    ["经营期年均收入", _fmt_money(result.annual_revenue)],
-                ],
-                styles,
-                right_align={1},
-            )
-        )
 
-        # ---------- 9. 现金流 ----------
-        story.append(Paragraph("八、现金流", styles["h1"]))
+        # ---------- 现金流·年度 ----------
+        story.append(Paragraph("（二）年度现金流", styles["h2"]))
         cash_rows = [["年份", "发电量(kWh)", "收入(元)", "运维费(元)", "EBITDA(元)", "税费(元)", "项目现金流(元)", "资本金现金流(元)"]]
         cash_rows.append(
             [
@@ -352,9 +661,33 @@ class PdfExporter:
             )
         story.append(self._table(cash_rows[0], cash_rows[1:], styles, right_align=set(range(1, 8)), repeat=1))
 
-        # ---------- 10. 经济指标 ----------
+
+        # ---------- 十一、经济指标 ----------
+        story.append(Paragraph("十一、经济指标", styles["h1"]))
+
+        story.append(Paragraph("（一）收益测算", styles["h2"]))
+        story.append(
+            self._table(
+                ["收益项", "首年金额（元）"],
+                [
+                    ["光伏自用收益", _fmt_money(first.pv_self_use_revenue if first else 0.0)],
+                    ["光伏上网收益", _fmt_money(first.pv_export_revenue if first else 0.0)],
+                    ["储能套利收益", _fmt_money(first.storage_arbitrage_revenue if first else 0.0)],
+                    ["储能容量收益", _fmt_money(first.storage_capacity_revenue if first else 0.0)],
+                    ["储能辅助服务收益", _fmt_money(first.storage_ancillary_revenue if first else 0.0)],
+                    ["储能其他收益", _fmt_money(first.storage_other_revenue if first else 0.0)],
+                    ["首年收入合计", _fmt_money(result.first_year_revenue)],
+                    ["经营期年均收入", _fmt_money(result.annual_revenue)],
+                ],
+                styles,
+                right_align={1},
+            )
+        )
+
+
+        # ---------- 经济指标·指标 ----------
         story.append(PageBreak())
-        story.append(Paragraph("九、经济指标", styles["h1"]))
+        story.append(Paragraph("（二）经济指标", styles["h2"]))
         story.append(
             self._table(
                 ["指标", "数值", "说明"],
@@ -374,26 +707,9 @@ class PdfExporter:
             )
         )
 
-        # ---------- 11. 敏感性分析 ----------
-        story.append(Paragraph("十、敏感性分析", styles["h1"]))
-        sens_rows = [["变化因素", "变化率", "项目IRR", "资本金IRR", "项目NPV(元)", "静态回收期(年)"]]
-        for row in result.sensitivity:
-            sens_rows.append(
-                [
-                    row.variable_label,
-                    f"{row.change:+.0%}",
-                    _fmt_pct(row.project_irr),
-                    _fmt_pct(row.equity_irr),
-                    _fmt_money(row.project_npv),
-                    _fmt_num(row.static_payback),
-                ]
-            )
-        if len(sens_rows) == 1:
-            sens_rows.append(["—", "—", "—", "—", "—", "—"])
-        story.append(self._table(sens_rows[0], sens_rows[1:], styles, right_align={1, 2, 3, 4, 5}))
 
-        # ---------- 12. 情景分析 ----------
-        story.append(Paragraph("十一、情景分析", styles["h1"]))
+        # ---------- 十二、方案比较 ----------
+        story.append(Paragraph("十二、方案比较", styles["h1"]))
         story.append(
             Paragraph("所有情景均自基准情景复制后施加显式乘数得到，不存在“保守→乐观”的链式推导。", styles["body"])
         )
@@ -413,12 +729,33 @@ class PdfExporter:
             scen_rows.append(["—", "—", "—", "—", "—", "—"])
         story.append(self._table(scen_rows[0], scen_rows[1:], styles, right_align={1, 2, 3, 4}))
 
-        # ---------- 13. 风险提示 ----------
-        story.append(Paragraph("十二、风险提示", styles["h1"]))
+
+        # ---------- 十三、敏感性 ----------
+        story.append(Paragraph("十三、敏感性", styles["h1"]))
+        sens_rows = [["变化因素", "变化率", "项目IRR", "资本金IRR", "项目NPV(元)", "静态回收期(年)"]]
+        for row in result.sensitivity:
+            sens_rows.append(
+                [
+                    row.variable_label,
+                    f"{row.change:+.0%}",
+                    _fmt_pct(row.project_irr),
+                    _fmt_pct(row.equity_irr),
+                    _fmt_money(row.project_npv),
+                    _fmt_num(row.static_payback),
+                ]
+            )
+        if len(sens_rows) == 1:
+            sens_rows.append(["—", "—", "—", "—", "—", "—"])
+        story.append(self._table(sens_rows[0], sens_rows[1:], styles, right_align={1, 2, 3, 4, 5}))
+
+
+        # ---------- 十四、风险 ----------
+        story.append(Paragraph("十四、风险", styles["h1"]))
         story.append(Paragraph(self._risk_text(project, result), styles["body"]))
 
-        # ---------- 14. 政策依据 ----------
-        story.append(Paragraph("十三、政策依据", styles["h1"]))
+
+        # ---------- 十五、参数来源 ----------
+        story.append(Paragraph("十五、参数来源", styles["h1"]))
         policy = project.policy
         if policy is None:
             story.append(
@@ -451,8 +788,9 @@ class PdfExporter:
             )
             story.append(Paragraph(f"本测算采用政策：{policy.display_version}。", styles["body"]))
 
-        # ---------- 15. 测算说明 ----------
-        story.append(Paragraph("十四、测算说明", styles["h1"]))
+
+        # ---------- 十五、参数来源·说明 ----------
+        story.append(Paragraph("（一）测算说明", styles["h2"]))
         for note in result.notes:
             story.append(Paragraph(f"• {note}", styles["body"]))
         story.append(Spacer(1, 6 * mm))
@@ -481,8 +819,11 @@ class PdfExporter:
             )
         )
         story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph("十六、免责声明", styles["h1"]))
+
         story.append(Paragraph(DISCLAIMER, styles["small"]))
         story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+
         return story
 
     # ------------------------------------------------------------------ #
