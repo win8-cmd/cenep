@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cenep"
+version = "1.0.0"
+description = "工商业新能源项目经济评价软件 V1（前期快速测算）"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scipy>=1.11",
+    "openpyxl>=3.1",
+    "XlsxWriter>=3.2",
+    "reportlab>=4.1",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.7"]
+dev = ["pytest>=8.0", "pyinstaller>=6.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:cenep.*"]

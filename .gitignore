@@ -1,0 +1,68 @@
+# ============================================================================
+# CENEP V1 — 忽略规则
+# ============================================================================
+
+# ---- 依赖安装目录（本机用 pip --target 安装，约 794 MB / 1.2 万文件）----
+# 绝不提交；他人用 `pip install -r requirements.txt` 或 `pip install -e .[gui,dev]` 还原
+.pylibs/
+.venv/
+venv/
+env/
+
+# ---- 打包产物（EXE 通过 GitHub Releases 分发，不进仓库）----
+dist/
+build/work/
+build/*.toc
+build/*.pkg
+build/*.html
+build/warn-*.txt
+build/xref-*.txt
+
+# ---- 自检与运行产物（可随时重新生成）----
+build/*_selftest.json
+build/exe_*.txt
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- 设计文档：保留在本地，不随仓库分发（仅 README 入库）----
+/*.md
+!/README.md
+
+# ---- 示例产物（由 tools/make_examples.py 生成，可随时重建，不入库）----
+examples/*.nep
+examples/*.pdf
+examples/*.xlsx
+examples/checks.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# ---- 测试与覆盖率 ----
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.tox/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- 临时文件 ----
+*.tmp
+*.bak
+*~
+tmp*/
