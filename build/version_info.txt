@@ -1,0 +1,36 @@
+# UTF-8
+# CENEP Windows 可执行文件版本资源（V2.0.0）。
+# 由 build/CENEP.spec 的 EXE(version=...) 引用，PyInstaller 会把它编译进 CENEP.exe
+# 的 Win32 版本资源，使文件属性页显示 "2.0.0"。
+VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers=(2, 0, 0, 0),
+        prodvers=(2, 0, 0, 0),
+        mask=0x3F,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0),
+    ),
+    kids=[
+        StringFileInfo(
+            [
+                StringTable(
+                    "080404b0",
+                    [
+                        StringStruct("CompanyName", "CENEP"),
+                        StringStruct("FileDescription", "CENEP V2 工商业新能源项目经济评价软件"),
+                        StringStruct("FileVersion", "2.0.0.0"),
+                        StringStruct("InternalName", "CENEP"),
+                        StringStruct("LegalCopyright", "CENEP"),
+                        StringStruct("OriginalFilename", "CENEP.exe"),
+                        StringStruct("ProductName", "CENEP"),
+                        StringStruct("ProductVersion", "2.0.0"),
+                    ],
+                )
+            ]
+        ),
+        VarFileInfo([VarStruct("Translation", [0x0804, 1200])]),
+    ],
+)
