@@ -130,6 +130,20 @@ class TestDispatchConfigValidation:
         assert cfg.allow_export is False
         assert cfg.allow_grid_charge is False
 
+    def test_default_efficiency_matches_v1_round_trip(self):
+        """回归：往返效率必须严格等于 V1 的 0.88。
+
+        早期默认单向效率写成 0.938，``0.938² = 0.879844``，与 V1 的 0.88 相差 0.016%，
+        会通过储能套利收益与 LCOS 传导到经济指标。默认值改为 ``√0.88`` 精确均分。
+        """
+        cfg = StorageDispatchConfig()
+        assert cfg.round_trip_efficiency == pytest.approx(0.88, rel=1e-12)
+        assert cfg.charge_efficiency == pytest.approx(cfg.discharge_efficiency, rel=1e-12)
+
+    def test_custom_efficiencies_multiply(self):
+        cfg = StorageDispatchConfig(charge_efficiency=0.95, discharge_efficiency=0.9)
+        assert cfg.round_trip_efficiency == pytest.approx(0.855)
+
     def test_soc_bounds(self):
         with pytest.raises(ValidationError, match="SOC 下限必须小于上限"):
             StorageDispatchConfig(soc_min=0.9, soc_max=0.5)

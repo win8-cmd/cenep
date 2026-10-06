@@ -27,6 +27,7 @@ V2 §52–§54 要求导入校验必须**报告**「负负荷」「PV 夜间发�
 
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from typing import Any, ClassVar
 
@@ -256,6 +257,15 @@ class TariffProfile(_Model):
 # --------------------------------------------------------------------------- #
 # V2 §6 / §10–§15 储能调度配置
 # --------------------------------------------------------------------------- #
+#: 与 V1 一致的往返效率（``StorageConfig.round_trip_efficiency = 0.88``）。
+V1_ROUND_TRIP_EFFICIENCY = 0.88
+
+#: 单向效率默认值 = ``√0.88``。
+#: 取精确均分而**不是** 0.938，是为了让 ``η_charge × η_discharge`` 严格等于 V1 的 0.88：
+#: ``0.938² = 0.879844``，会带来 0.016% 的口径漂移，进而影响储能套利收益与 LCOS。
+DEFAULT_ONE_WAY_EFFICIENCY = math.sqrt(V1_ROUND_TRIP_EFFICIENCY)
+
+
 class StorageDispatchConfig(_Model):
     """储能调度配置（V2 §6、§10–§15、§20、§21）。
 
@@ -280,8 +290,20 @@ class StorageDispatchConfig(_Model):
     soc_max: float = Field(default=1.00, ge=0.0, le=1.0, description="SOC 上限（V2 §10.1）")
     initial_soc: float = Field(default=0.10, ge=0.0, le=1.0, description="仿真起始 SOC")
 
-    charge_efficiency: float = Field(default=0.938, gt=0.0, le=1.0, description="充电效率 η_charge")
-    discharge_efficiency: float = Field(default=0.938, gt=0.0, le=1.0, description="放电效率 η_discharge")
+    charge_efficiency: float = Field(
+        default=DEFAULT_ONE_WAY_EFFICIENCY, gt=0.0, le=1.0, description="充电效率 η_charge（V2 §10.3）"
+    )
+    discharge_efficiency: float = Field(
+        default=DEFAULT_ONE_WAY_EFFICIENCY,
+        gt=0.0,
+        le=1.0,
+        description="放电效率 η_discharge（V2 §10.4）",
+    )
+
+    @property
+    def round_trip_efficiency(self) -> float:
+        """往返效率 ``η_charge × η_discharge``（与 V1 的 0.88 保持同一口径）。"""
+        return self.charge_efficiency * self.discharge_efficiency
 
     max_charge_power: float = NON_NEG
     max_discharge_power: float = NON_NEG
