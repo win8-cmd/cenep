@@ -71,7 +71,13 @@ SAVING_IDENTITY_TOLERANCE = 1e-6
 
 @dataclass
 class YearSimulation:
-    """单个运营年度的时序仿真结果。"""
+    """单个运营年度的时序仿真结果。
+
+    **不**持有 8760 个 :class:`DispatchDecision` 对象（V2 §87 内存要求）：
+    逐时动作与原因以列式数组存放在 ``outcome.action_codes`` / ``outcome.reasons``，
+    需要行视图时用 :meth:`decisions` 按区间物化。
+    25 年 × 8760 个 Pydantic 对象会占约 110 MB，没有必要。
+    """
 
     year_index: int
     axis: TimeAxis
@@ -82,11 +88,46 @@ class YearSimulation:
     balance: EnergyBalance
     metrics: TimeSeriesMetrics
     baseline: BaselineResult
-    decisions: list[DispatchDecision] = field(default_factory=list)
 
     @property
     def usable_capacity_kwh(self) -> float:
         return float(self.outcome.storage.usable_energy_kwh)
+
+    @property
+    def dispatch_action_codes(self) -> list[str]:
+        return list(self.outcome.action_codes)
+
+    @property
+    def dispatch_reasons(self) -> list[str]:
+        return list(self.outcome.reasons)
+
+    def decisions(self, start: int = 0, end: int | None = None) -> list[DispatchDecision]:
+        """按区间物化逐时调度决策（V2 §16）。
+
+        默认区间取**首 168 小时（一周）**——报告与界面明细的常用窗口；
+        传 ``end=len(self)`` 可取整年，但会创建 8760 个对象。
+        """
+        stop = 168 if end is None else end
+        stop = min(stop, self.axis.point_count)
+        codes = self.outcome.action_codes
+        return [
+            DispatchDecision(
+                timestamp=self.axis.timestamps[i],
+                action=DispatchAction(codes[i]) if codes[i] else DispatchAction.IDLE,
+                reason=self.outcome.reasons[i],
+                reason_code=self.outcome.reason_codes[i],
+                charge_energy=float(self.outcome.storage.charge_ac[i]),
+                discharge_energy=float(self.outcome.storage.discharge_ac[i]),
+            )
+            for i in range(max(start, 0), stop)
+        ]
+
+    def reason_summary(self) -> dict[str, int]:
+        """各原因码出现的次数，用于报告中的调度行为统计。"""
+        summary: dict[str, int] = {}
+        for code in self.outcome.reason_codes:
+            summary[code] = summary.get(code, 0) + 1
+        return dict(sorted(summary.items(), key=lambda kv: -kv[1]))
 
 
 # --------------------------------------------------------------------------- #
@@ -272,19 +313,6 @@ def simulate_year(
             f"偏差 {deviation:.6f} 元 —— 存在重复计算或漏计"
         )
 
-    codes = list(outcome.action_codes)
-    decisions = [
-        DispatchDecision(
-            timestamp=axis.timestamps[i],
-            action=DispatchAction(codes[i]) if codes[i] else DispatchAction.IDLE,
-            reason=outcome.reasons[i],
-            reason_code=outcome.reason_codes[i],
-            charge_energy=float(outcome.storage.charge_ac[i]),
-            discharge_energy=float(outcome.storage.discharge_ac[i]),
-        )
-        for i in range(axis.point_count)
-    ]
-
     _ = quality
     return YearSimulation(
         year_index=year_index,
@@ -296,7 +324,6 @@ def simulate_year(
         balance=balance,
         metrics=metrics,
         baseline=baseline,
-        decisions=decisions,
     )
 
 
