@@ -598,8 +598,10 @@ class CalculationService:
             "为**排名近似值**——每个组合只跑首年逐时仿真，再用线性外推"
             "（负荷类 (1+g_load)^(n-1)、光伏类 (1-d_pv)^(n-1)、储能类 (1-d_es)^(n-1)、"
             "电价类 (1+g_tariff)^(n-1)）构造全周期收益，只用于横向排序，不得作为最终结论；"
+            "方案寻优（若开启）同样按「排名用首年 + 线性外推的近似值、最优候选做完整运营期"
+            "**精确复核**」的两阶段口径输出（V2 §48 禁止黑盒、§86 两阶段评估）；"
             f"「{CURRENT_SCENARIO_LABEL}」一行直接取自本次唯一计算结果，其 "
-            "project_irr / project_npv / lcoe / lcos 与主结果逐位一致（精确口径）。"
+            "project_irr / project_npv / lcoe / lcos 与主结果逐位一致（精确口径，非近似）。"
         )
 
     @staticmethod

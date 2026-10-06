@@ -89,6 +89,39 @@ class TestCalculationService:
 
 
 class TestLogging:
+    @pytest.fixture(autouse=True)
+    def _restore_global_logging(self):
+        """测试后还原全局 logger 配置。
+
+        ``setup_logging(..., force=True)`` 会**关闭并替换**全局 logger 的 handler，
+        把输出指向 ``tmp_path``。而 ``tmp_path`` 在本测试结束后即被 pytest 删除，
+        于是同一进程内**后续测试**写日志时会落到已删除的目录 —— 表现为
+        "单独跑通过、全量按时偶发失败"（曾误伤 test_selftest 与 test_optimization）。
+
+        这里保存原 handler/级别/传播设置，测试后精确还原，消除测试间耦合。
+        """
+        from cenep.infrastructure.logging_setup import get_logger
+
+        logger = get_logger()
+        saved_handlers = list(logger.handlers)
+        saved_level = logger.level
+        saved_propagate = logger.propagate
+        try:
+            yield
+        finally:
+            for handler in list(logger.handlers):
+                if handler not in saved_handlers:
+                    logger.removeHandler(handler)
+                    try:
+                        handler.close()
+                    except Exception:  # noqa: BLE001 - 关闭失败不应影响测试收尾
+                        pass
+            for handler in saved_handlers:
+                if handler not in logger.handlers:
+                    logger.addHandler(handler)
+            logger.setLevel(saved_level)
+            logger.propagate = saved_propagate
+
     def test_log_file_created(self, tmp_path: Path, golden_pv):
         """§133：日志记录项目加载/计算开始/结束。"""
         from cenep.infrastructure.logging_setup import setup_logging

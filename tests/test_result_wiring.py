@@ -137,7 +137,9 @@ class TestNotesDisclosure:
         for keyword in ("仅光伏", "仅储能", "光伏+储能"):
             assert keyword in text, f"notes 未说明做了哪种方案比较：缺少「{keyword}」"
         assert "线性外推" in text, "notes 必须说明排名用的是首年 + 线性外推的近似"
+        assert "首年" in text
         assert "近似" in text
+        assert "精确复核" in text, "notes 必须说明最优候选是精确复核（§48）"
         assert "逐位一致" in text, "notes 必须说明「当前方案」与主结果逐位一致（§105）"
 
     def test_notes_explain_how_to_enable_optimization(self, default_result):
@@ -191,6 +193,37 @@ class TestOptimizationWhenEnabled:
         notes = "\n".join(result.notes)
         assert "方案寻优已执行" in notes
         assert _has_chinese(notes)
+
+    def test_excel_sheets_no_longer_say_not_executed(self, golden_ts_project, tmp_path):
+        """端到端：Excel「方案比较」「方案寻优」两张表不再输出"未执行"占位说明。"""
+        from openpyxl import load_workbook
+
+        from cenep.reports.excel_exporter import ExcelExporter
+
+        project = golden_ts_project.model_copy(deep=True)
+        project.timeseries.optimization_enabled = True
+        result = CalculationService().calculate(project)
+
+        path = ExcelExporter().export(project, result, tmp_path / "wiring.xlsx")
+        workbook = load_workbook(path)
+
+        def _text(sheet_name: str) -> str:
+            return "\n".join(
+                str(cell.value)
+                for row in workbook[sheet_name].iter_rows()
+                for cell in row
+                if cell.value is not None
+            )
+
+        compare = _text("方案比较")
+        assert "未执行方案比较" not in compare
+        assert CURRENT_SCENARIO_LABEL in compare
+        assert "仅光伏" in compare and "仅储能" in compare
+
+        optimization_sheet = _text("方案寻优")
+        assert "未执行方案寻优" not in optimization_sheet
+        assert result.optimization_results is not None
+        assert result.optimization_results.best_run_id in optimization_sheet
 
 
 # --------------------------------------------------------------------------- #
