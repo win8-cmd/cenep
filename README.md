@@ -51,14 +51,37 @@ python -m cenep --selftest out.json   # 结果写入文件
 ### 打包为免安装 EXE
 
 ```bash
-pip install pyinstaller
+pip install -r requirements.txt   # 已含 pyinstaller / PyQtGraph / scipy
 pyinstaller build/CENEP.spec --noconfirm
 ```
 
-产物为 `dist/CENEP/CENEP.exe`，双击即可运行，**目标机器无需安装 Python**。
+产物为 `dist/CENEP/CENEP.exe`（**V2 实测 21,958,256 字节 ≈ 20.9 MB**，Win32 版本资源
+`FileVersion = 2.0.0.0`），双击即可运行，**目标机器无需安装 Python**。
 
-> 打包时 `openpyxl` 与 `reportlab` 的数据文件必须一并收集（`build/CENEP.spec` 已通过
+> 打包时 `openpyxl`、`reportlab` 的数据文件必须一并收集（`build/CENEP.spec` 已通过
 > `collect_all` 处理），否则打包后的程序会在导出 Excel/PDF 时失败。
+>
+> **V2 追加的打包要点**：`pyqtgraph`（交互图表，含 `pyi_rth_pyqtgraph_multiprocess`
+> 运行时钩子）与 `scipy`（`optimization/lp_optimizer.py` 的
+> `scipy.optimize.linprog(method="highs")`，含 `_highspy` 编译扩展）已登记为
+> `hiddenimports`，否则打包后 LP 寻优会**静默降级**为贪心；
+> 版本资源由 `build/version_info.txt` 提供。
+>
+> **验证打包产物**：GUI 子系统 EXE 用 `&` **不会等待**，必须用 `Start-Process -PassThru`
+> 或 `.NET ProcessStartInfo`（`UseShellExecute=$false` + 重定向 stdout）才能拿到退出码与
+> 启动期错误：
+>
+> ```powershell
+> $p = Start-Process -FilePath .\dist\CENEP\CENEP.exe `
+>                    -ArgumentList '--selftest','.\build\selftest.json' `
+>                    -WorkingDirectory .\dist\CENEP -PassThru
+> $p.WaitForExit(240000); $p.ExitCode        # 期望 0
+> # 报告 build\selftest.json 中 "ok": true 即通过（三个黄金项目 + Excel 24 表 + PDF）
+> ```
+>
+> 体积变化说明：V1 为 16,032,252 字节，V2 增大 5,926,004 字节（+37.0%），
+> 属**预期之内** —— 新增 PyQtGraph、SciPy（含 HiGHS/`_highspy` 与 4 个 DLL 搜索目录）
+> 以及 V2 模块与报表模板。详见 [V2_ACCEPTANCE.md](V2_ACCEPTANCE.md) 第七节。
 
 ## 4. 目录
 
@@ -86,7 +109,7 @@ cenep/
 │   └── ui/               PySide6 界面（只展示 CalculationResult）+ PyQtGraph 图表
 ├── tests/                pytest 测试体系（32 个测试文件 / 885 个用例）
 ├── tools/make_examples.py  生成示例项目与导出件（产物不入库）
-├── build/                PyInstaller 打包配置（EXE 通过 Releases 分发）
+├── build/                PyInstaller 打包配置（CENEP.spec / entry.py / version_info.txt）
 └── *.md                  设计与规范文档（见第 6 节）
 ```
 
@@ -98,10 +121,13 @@ cenep/
 4. **GUI / Excel / PDF 一律不得自行计算**，只能调用 `calculation_engine.calculate(project)`。
 5. **政策不硬编码**：任何电价、补贴、机制电量等政策参数都来自 `PolicyProfile`，且带版本与出处。
 6. **每个数字可追溯**：参数带来源类型（用户输入/政策/合同/实测/经验/假设/系统默认/计算得出）。
-7. **每个公式可测试**：修改任何公式后必须 `pytest` 全绿。
+7. **每个公式可测试**：修改任何公式后必须 `pytest` 全绿（当前 **885 passed / 0 failed**，用例数不得少于 884）。
+8. **V1 兼容不可破**：V1 项目文件（`schema_version` `1.0`/`1.1`）自动迁移为 `2.0`，
+   V1 公式与年度口径不变，V1 项目的报表与结果不受 V2 影响。
 
-> 第 4 条由测试强制保证：`tests/test_gui.py` 会静态扫描 GUI/报表源码，
-> 一旦出现 `npv(`、`irr(`、`lcoe(` 等计算调用即判定失败。
+> 第 4 条由测试强制保证：`tests/test_gui.py` 与 `tests/test_gui_v2.py` 会静态扫描
+> GUI/报表源码，一旦出现 `npv(`、`irr(`、`lcoe(` 等计算调用即判定失败；
+> V2 图表另有一条约束——只能从 `TimeSeriesResultSet.column()` 取列（§61 单一计算源）。
 
 ## 6. 设计文档
 
