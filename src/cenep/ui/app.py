@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..infrastructure.logging_setup import setup_logging
 
-APP_NAME = "CENEP V1"
+APP_NAME = "CENEP V2"
 ORG_NAME = "CENEP"
 
 
