@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+from ..domain.bill_models import BILL_FIELD_LABELS
 from ..domain.enums import (
+    BillSourceType,
     DispatchStrategy,
+    DuplicateStrategy,
     InvestmentMode,
     LoadProfileMode,
     MissingDataPolicy,
@@ -18,6 +21,7 @@ from ..domain.enums import (
     RoofRentMode,
     SourceType,
     TariffMode,
+    TariffStructure,
 )
 from .field_spec import FieldSpec, Kind, SectionSpec
 
@@ -603,13 +607,149 @@ SOURCE_LEGEND = (
     ("#EDEDED", "灰色：政策模板"),
 )
 
+# --------------------------------------------------------------------------- #
+# V2.1 阶段 2：账单页字段规格（规格书 §5.4「手动录入 UI」）
+#
+# 设计约束：
+# * **只声明字段，不含任何计算**——求和、差异、平均电价全部由
+#   ``cenep.calculation.bill_calculator`` 经 ``BillService`` 返回（§0.2 铁律 1）；
+# * 中文名与单位**全部**取自 ``domain/bill_models.py::BILL_FIELD_LABELS``，
+#   不在界面里写死文案与单位（交接文档 §7 第 3 条）。因此这里不再单列 ``unit``：
+#   标签本身已带单位（如"总购电量（kWh）"），避免单位出现两处而漂移；
+# * 三个分组**不进** ``ALL_SECTIONS``：参数页仍是既有 14 组，账单表单只在账单页使用。
+# --------------------------------------------------------------------------- #
+#: 可留空字段的勾选框提示：不勾选 = **账单未提供**（V2.1 §2.1：不得自动填 0）
+BILL_MISSING_TOOLTIP = "不勾选 = 账单未提供该字段（按 None 处理，不会按 0 参与合计）"
+
+#: 账单数据来源选项（§2.1：manual / excel / estimated，中文标签取自枚举）
+BILL_SOURCE_CHOICES = tuple((m.value, m.label) for m in BillSourceType)
+#: 计费方式选项（§2.1：single_part / two_part / unknown）
+TARIFF_STRUCTURE_CHOICES = tuple((m.value, m.label) for m in TariffStructure)
+#: 重复账单处理策略选项（§5.5：跳过 / 替换 / 保留）
+DUPLICATE_STRATEGY_CHOICES = tuple((m.value, m.label) for m in DuplicateStrategy)
+
+
+def _bill_field(
+    name: str,
+    kind: Kind = Kind.OPTIONAL_FLOAT,
+    **kwargs,
+) -> FieldSpec:
+    """按字段名生成账单字段规格，中文名取 :data:`BILL_FIELD_LABELS`（V2.1 §5.4）。"""
+    kwargs.setdefault("tooltip", BILL_MISSING_TOOLTIP)
+    kwargs.setdefault("optional_label", "填写")
+    kwargs.setdefault("optional_tooltip", BILL_MISSING_TOOLTIP)
+    return FieldSpec(name, BILL_FIELD_LABELS[name], kind, **kwargs)
+
+
+#: 账单基本信息（账期、计量点、计费方式、来源、备注）
+BILL_BASIC_SECTION = SectionSpec(
+    "账单基本信息",
+    [
+        _bill_field("billing_period_start", Kind.DATE, tooltip="账单账期起始日（含），格式 YYYY-MM-DD"),
+        _bill_field("billing_period_end", Kind.DATE, tooltip="账单账期结束日（含），格式 YYYY-MM-DD"),
+        _bill_field("meter_id", Kind.TEXT, tooltip="计量点编号；留空表示未提供（与账期共同决定重复判定）"),
+        _bill_field("customer_name", Kind.TEXT, tooltip="账单上的客户名称；留空表示未提供"),
+        _bill_field("voltage_level", Kind.TEXT, tooltip="如 10kV；留空表示未提供"),
+        FieldSpec(
+            "tariff_structure",
+            BILL_FIELD_LABELS["tariff_structure"],
+            Kind.CHOICE,
+            choices=TARIFF_STRUCTURE_CHOICES,
+            tooltip="单一制 / 两部制 / 未知（两部制才有基本电费与需量电费）",
+        ),
+        _bill_field("contract_capacity_kva", maximum=1e9, decimals=2, step=100.0),
+        _bill_field(
+            "billing_demand_kw",
+            maximum=1e9,
+            decimals=2,
+            step=10.0,
+            tooltip="账单上的计费需量（账单事实），**不是**负荷曲线最大值",
+        ),
+        FieldSpec(
+            "source_type",
+            BILL_FIELD_LABELS["source_type"],
+            Kind.CHOICE,
+            choices=BILL_SOURCE_CHOICES,
+            tooltip="手动录入 / Excel 导入 / 估算；估算数据在界面与报告中都会带标签",
+        ),
+        _bill_field("notes", Kind.TEXT, tooltip="备注（如账单口径、补退费说明）"),
+    ],
+)
+
+#: 账单电量（总购电量 + 五个分时时段；None = 未提供，不按 0 处理）
+BILL_ENERGY_SECTION = SectionSpec(
+    "电量（kWh）",
+    [
+        _bill_field("energy_total_kwh", decimals=2, step=1000.0),
+        _bill_field("energy_sharp_kwh", decimals=2, step=100.0),
+        _bill_field("energy_peak_kwh", decimals=2, step=100.0),
+        _bill_field("energy_flat_kwh", decimals=2, step=100.0),
+        _bill_field("energy_valley_kwh", decimals=2, step=100.0),
+        _bill_field(
+            "energy_offpeak_kwh",
+            decimals=2,
+            step=100.0,
+            tooltip="深谷电量；**不是**低谷（低谷见「低谷电量」），两者不得混淆",
+        ),
+    ],
+)
+
+#: 账单费用分项（元；None = 未提供；仅"调整 / 返还"类允许负值）
+BILL_CHARGE_SECTION = SectionSpec(
+    "费用（元）",
+    [
+        _bill_field("energy_charge_yuan", maximum=1e12, decimals=2, step=1000.0),
+        _bill_field("market_purchase_charge_yuan", maximum=1e12, decimals=2, step=1000.0),
+        _bill_field("transmission_distribution_charge_yuan", maximum=1e12, decimals=2, step=1000.0),
+        _bill_field("line_loss_charge_yuan", maximum=1e12, decimals=2, step=100.0),
+        _bill_field("system_operation_charge_yuan", maximum=1e12, decimals=2, step=100.0),
+        _bill_field("government_fund_charge_yuan", maximum=1e12, decimals=2, step=100.0),
+        _bill_field("basic_capacity_charge_yuan", maximum=1e12, decimals=2, step=1000.0),
+        _bill_field("demand_charge_yuan", maximum=1e12, decimals=2, step=1000.0),
+        _bill_field(
+            "power_factor_adjustment_yuan",
+            minimum=-1e12,
+            maximum=1e12,
+            decimals=2,
+            step=100.0,
+            tooltip="功率因数调整电费；可为负（返还 / 奖励），这是允许负值的字段之一",
+        ),
+        _bill_field("other_charge_yuan", maximum=1e12, decimals=2, step=100.0),
+        _bill_field("vat_yuan", maximum=1e12, decimals=2, step=1000.0),
+        _bill_field(
+            "adjustment_charge_yuan",
+            minimum=-1e12,
+            maximum=1e12,
+            decimals=2,
+            step=100.0,
+            tooltip="调整 / 补退费；可为负，这是允许负值的字段之一",
+        ),
+        _bill_field("bill_total_yuan", maximum=1e12, decimals=2, step=1000.0),
+    ],
+)
+
+#: 账单页使用的全部表单分组（顺序即界面顺序）
+BILL_SECTIONS: tuple[SectionSpec, ...] = (
+    BILL_BASIC_SECTION,
+    BILL_ENERGY_SECTION,
+    BILL_CHARGE_SECTION,
+)
+
 __all__ = [
     "ALL_SECTIONS",
+    "BILL_BASIC_SECTION",
+    "BILL_CHARGE_SECTION",
+    "BILL_ENERGY_SECTION",
+    "BILL_MISSING_TOOLTIP",
+    "BILL_SECTIONS",
+    "BILL_SOURCE_CHOICES",
+    "DUPLICATE_STRATEGY_CHOICES",
     "GENERAL_SECTION",
     "LOAD_SECTION",
     "PV_SECTION",
     "STORAGE_SECTION",
     "TARIFF_SECTION",
+    "TARIFF_STRUCTURE_CHOICES",
     "INVESTMENT_SECTION",
     "OPEX_SECTION",
     "TAX_SECTION",

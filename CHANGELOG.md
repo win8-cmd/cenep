@@ -17,7 +17,69 @@
 
 ---
 
-## [Unreleased] — V2.0.0
+## [Unreleased] — V2.1（阶段 2：账单页面与报告）
+
+> **定位**：把 V2.1 阶段 1 交付的账单能力（`domain/bill_models.py`、
+> `calculation/bill_calculator.py`、`data/bill_importer.py`、`application/bill_service.py`）
+> **接进现有 GUI 与 Excel/PDF 报告**，即《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 2：
+> 「用户无需修改代码即可导入并查看账单」。
+>
+> **状态**：**已交付并可运行**。全部改动为**附加式**：既有 8 个页面的标题与相对顺序、
+> 既有 24 张工作表与 16 个 PDF 部分的**名目与内容一项未删**；新增页面 / 工作表 / 章节均为追加。
+> 全量测试由 **1126 passed** 增至 **>1126 passed / 0 failed / 0 skipped**
+> （新增 `tests/test_bill_ui_report.py`，并同步 6 个既有测试文件的表数 / 章节数 / 页面数断言）。
+>
+> **红线遵守**：账单页与报告**不含任何计算**——列表、汇总、差异、平均电价、校验级别
+> 全部来自 `BillService`（其内部再委托 `calculation/bill_calculator.py`）；
+> `policy/hubei.py` 未改动（仍全 `None`）；界面无动画、无 AI 聊天入口。
+
+### Added（V2.1 阶段 2 新增）
+
+- **「月度账单」页面**（`ui/pages.py::BillsPage`，注册于 `ui/main_window.py::_build_ui`）：
+  账单列表（按账期排序、按月份筛选）、录入 / 编辑表单、月度汇总、年度汇总、
+  分级校验提示、导入向导五个页签。
+  - 表单**复用** `ui/field_spec.py` 的 `SectionSpec` / `FieldSpec` / `SectionForm`，
+    字段规格新增于 `ui/sections.py` 的 `BILL_SECTIONS`（**不进** `ALL_SECTIONS`，
+    参数页仍为既有 14 组）；中文名与单位统一取自 `domain/bill_models.py::BILL_FIELD_LABELS`。
+  - `field_spec.py` **附加式**新增 `Kind.DATE`（账期用 `QDateEdit`）与 `FieldSpec.optional_tooltip`
+    （既有字段的可留空提示文案一字未改）。
+  - **六步导入向导**（`ui/pages.py::BillImportWizard`）：选文件 → 选表 → 映射列 → 预览 → 校验 →
+    确认导入；自动列映射失败时自动切换为**手工列映射**（支持用户重命名列）；
+    重复账单按「跳过 / 替换 / 保留两条」选择；错误行定位到「工作表 / 行号 / 字段 / 原因」。
+  - 界面显式写明**账单事实与模拟结果的分界**（复算与光储方案模拟属于阶段 5/6，标注
+    「待确认 / 未建模」）、**数据来源标签**（手动录入 / Excel 导入 / 估算）、
+    **平均综合电价只是统计口径**，以及跨月账期 / 缺月 / 不可直接相加等提示。
+  - 电量与金额为 `None` 时显示「账单未提供」（**绝不显示 0**，§2.1）；校验问题按
+    ERROR（红）/ WARNING（橙）/ INFO（蓝）分级着色显示。
+  - 模板下载走 `BillService.template_bytes()`；导出文件名用 `with_name(name + 后缀)`。
+- **Excel 新增两张表**：`账单原始数据`（账单事实逐条明细，按账期排序）与
+  `账单校验`（ΔE / ΔC / 二层核对差异 + `assumptions` 口径假设）。
+  `SHEET_NAMES` 由 24 张增至 **26 张**；无账单时两张表照常生成，写
+  「本项目尚未录入电费账单」及三种录入方法，**不缺表、不报错**；
+  工作簿内公式数仍为 **0**。
+- **PDF 新增章节**「三、账单事实与校验」（位于「输入参数」之后、「负荷分析」之前）：
+  概况与月度趋势、账单事实明细、ΔE / ΔC 校验、口径假设，以及无账单时的说明段落。
+  `REPORT_SECTIONS` 由 16 部分增至 **17 部分**，既有章节编号整体顺延一位（内容未变）。
+- **新增测试** `tests/test_bill_ui_report.py`（47 例）：页面构造 / 填入 / 清空 / 空状态指引、
+  六步向导状态转换、ERROR/WARNING/INFO 分级与配色、`None` → 「账单未提供」（页面 + Excel + PDF
+  三处专测）、Excel 两张表有 / 无账单两种情况与公式数为 0、PDF 有 / 无账单与章节数、
+  §105 页面显示 = `BillService` 返回、主窗口保存 / 重开后账单恢复。
+
+### Changed（V2.1 阶段 2 变更）
+
+- `ui/main_window.py`：`_build_ui()` 的 `(widget, title)` 元组表**追加** `(self.bills_page, "月度账单")`
+  （紧跟「时序仿真」）；`_reload_all()` 经 `ProjectService.bill_service(project)` 装配账单服务。
+  页面数 8 → **9**（既有 8 个页面的标题与顺序未变）。
+- `src/cenep/selftest.py`：工作表数断言 24 → 26、PDF 章节数断言 16 → 17
+  （**唯一一处允许清单之外的改动**：该文件把两个数量硬编码为结构自检，
+  任务书要求同步表数断言，且不改则打包前自检必然失败；无任何行为变化）。
+- 同步既有测试断言（正当变更，均带「V2.1 新增账单页 / 账单表 / 账单章节」注释）：
+  `tests/test_gui.py`（`test_eight_tabs` → `test_nine_tabs`）、
+  `tests/test_excel_export.py`（24 → 26）、`tests/test_report_v2.py`（24 → 26、章节序号 + 图表所在章节）、
+  `tests/test_pdf_export.py`（16 → 17）、`tests/test_selftest.py`（24 → 26）。
+- 文档同步：`UI_SPEC.md`（9 个页面 + 账单页设计）、`REPORT_SPEC.md`（26 张表 / 17 部分）。
+
+---
 
 > **定位**：在 V1 年度模型之外新增**逐小时（8760）时序仿真**、**储能 SOC 调度与三策略**、
 > **需量电费与削峰**、**方案比较与三级寻优**与**时序数据导入／质量评分**

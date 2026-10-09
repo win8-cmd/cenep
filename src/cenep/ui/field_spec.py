@@ -13,10 +13,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -60,6 +61,13 @@ class Kind(StrEnum):
 
     OPTIONAL_INT = "optional_int"
 
+    DATE = "date"
+    """日期（``datetime.date``）。V2.1 阶段 2 为账单账期新增（§5.4）。
+
+    **附加式扩展**：既有 ``FLOAT/INT/PERCENT/TEXT/CHOICE/BOOL/OPTIONAL_*`` 的
+    行为与取值一字未改，新增成员不影响任何既有 ``SectionSpec``。
+    """
+
 
 @dataclass(frozen=True)
 class FieldSpec:
@@ -77,6 +85,12 @@ class FieldSpec:
     source: SourceType = SourceType.USER_INPUT
     tooltip: str = ""
     optional_label: str = "填写"
+    optional_tooltip: str = ""
+    """可留空字段勾选框的提示（V2.1 阶段 2 账单页新增）。
+
+    留空时沿用 V1/V2 既有文案"不勾选表示留空（由系统按电价参数推导或本项目不适用）"，
+    因此既有页面的行为与提示**一字未改**；账单页填"不勾选 = 账单未提供该字段（不按 0）"。
+    """
 
     @property
     def is_nullable(self) -> bool:
@@ -109,6 +123,25 @@ def set_path(obj: Any, path: str, value: Any) -> None:
     setattr(current, parts[-1], value)
 
 
+def _as_date(value: Any) -> date:
+    """把 ``date`` / ``datetime`` / ``YYYY-MM-DD`` 文本统一成 ``date``（V2.1 §5.4 账期字段）。
+
+    无法解析时回退到今天，避免界面在填入历史账单时抛异常——真正的**中文校验错误**
+    由账单服务（``BillService``）在保存时给出（V2.1 §0.2：不得抛裸异常给用户）。
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
+            try:
+                return datetime.strptime(value.strip(), fmt).date()
+            except ValueError:
+                continue
+    return date.today()
+
+
 # --------------------------------------------------------------------------- #
 # 控件构造
 # --------------------------------------------------------------------------- #
@@ -128,7 +161,10 @@ class FieldRow:
 
         if spec.is_nullable:
             self.checkbox = QCheckBox(spec.optional_label, self.container)
-            self.checkbox.setToolTip("不勾选表示留空（由系统按电价参数推导或本项目不适用）")
+            self.checkbox.setToolTip(
+                spec.optional_tooltip
+                or "不勾选表示留空（由系统按电价参数推导或本项目不适用）"
+            )
             self.checkbox.toggled.connect(self._on_toggle)
             layout.addWidget(self.checkbox)
 
@@ -173,6 +209,14 @@ class FieldRow:
             for value, label in spec.choices:
                 combo.addItem(label, value)
             return combo
+        if spec.kind == Kind.DATE:
+            from PySide6.QtWidgets import QDateEdit
+
+            edit = QDateEdit(parent)
+            edit.setCalendarPopup(True)
+            edit.setDisplayFormat("yyyy-MM-dd")
+            edit.setDate(QDate.currentDate())
+            return edit
         raise ValueError(f"不支持的字段类型：{spec.kind}")
 
     def _on_toggle(self, checked: bool) -> None:
@@ -196,6 +240,8 @@ class FieldRow:
             return bool(self.editor.isChecked())  # type: ignore[attr-defined]
         if spec.kind == Kind.CHOICE:
             return self.editor.currentData()  # type: ignore[attr-defined]
+        if spec.kind == Kind.DATE:
+            return self.editor.date().toPython()  # type: ignore[attr-defined]
         raise ValueError(spec.kind)
 
     def set_value(self, value: Any) -> None:
@@ -219,6 +265,9 @@ class FieldRow:
             index = self.editor.findData(data)  # type: ignore[attr-defined]
             if index >= 0:
                 self.editor.setCurrentIndex(index)  # type: ignore[attr-defined]
+        elif spec.kind == Kind.DATE:
+            parsed = _as_date(value)
+            self.editor.setDate(QDate(parsed.year, parsed.month, parsed.day))  # type: ignore[attr-defined]
 
     def colorize(self, source: SourceType) -> None:
         """按参数来源着色（规范 §144）。"""

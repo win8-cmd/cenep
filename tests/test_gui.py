@@ -39,12 +39,25 @@ def window(qapp, tmp_path: Path):
 
 
 class TestWindowStructure:
-    def test_eight_tabs(self, window):
-        """§97 + V2 §5：主界面包含 项目/参数/计算/结果/时序仿真/敏感性/报告/设置。"""
+    def test_nine_tabs(self, window):
+        """§97 + V2 §5 + V2.1 §5.4：主界面包含
+        项目/参数/计算/结果/时序仿真/月度账单/敏感性/报告/设置。
+
+        **V2.1 新增账单页**（「用电与电费 → 月度账单」，§5.4）：新页面插入在
+        「时序仿真」之后（同属数据输入区），既有 8 个页面的标题与相对顺序**一字未改**，
+        因此本断言是"追加一项"，不是改变既有页面的语义。
+        """
         titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
         assert titles == [
-            "项目", "参数", "计算", "结果", "时序仿真", "敏感性", "报告", "设置",
+            "项目", "参数", "计算", "结果", "时序仿真", "月度账单",
+            "敏感性", "报告", "设置",
         ]
+
+    def test_bills_tab_registered_and_bound(self, window):
+        """V2.1 阶段 2：账单页必须注册进主窗口并经 ProjectService 装配账单服务（§7）。"""
+        assert window.bills_page is not None
+        assert window.bills_page.service is not None
+        assert window.bills_page.service.project is window.project
 
     def test_parameter_tabs(self, window):
         titles = [window.parameters_page.tabs.tabText(i) for i in range(window.parameters_page.tabs.count())]

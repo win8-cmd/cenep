@@ -1,10 +1,12 @@
-"""七个页面：项目 / 参数 / 计算 / 结果 / 敏感性 / 报告 / 设置（规范 §97–§107）。
+"""主工作区页面：项目 / 参数 / 计算 / 结果 / 时序仿真 / 月度账单 / 敏感性 / 报告 / 设置。
 
-**本模块不含任何计算**：所有数值都来自 ``CalculationResult``。
+**本模块不含任何计算**：所有数值都来自 ``CalculationResult``（经济评价）或
+``BillService``（V2.1 账单事实，§5.4）。
 """
 
 from __future__ import annotations
 
+import calendar
 from datetime import date
 from pathlib import Path
 
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -38,7 +41,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..domain.enums import ProjectType, ScenarioType, SensitivityVariable
+from ..application.bill_service import SORT_FIELDS
+from ..calculation.errors import ValidationError
+from ..data.bill_importer import BILL_COLUMNS, list_sheets
+from ..data.importer import read_table_from_sheet
+from ..domain.bill_models import ElectricityBill, label_of
+from ..domain.enums import (
+    BillQualityStatus,
+    DuplicateStrategy,
+    ProjectType,
+    ScenarioType,
+    SensitivityVariable,
+)
 from ..domain.models import Project
 from ..domain.results import CalculationResult
 from .charts import (
@@ -50,7 +64,12 @@ from .charts import (
     create_range_selector,
 )
 from .field_spec import SectionForm
-from .sections import ALL_SECTIONS, SOURCE_LEGEND
+from .sections import (
+    ALL_SECTIONS,
+    BILL_SECTIONS,
+    DUPLICATE_STRATEGY_CHOICES,
+    SOURCE_LEGEND,
+)
 
 
 def _no_edit(table: QTableWidget) -> None:
@@ -1121,3 +1140,1343 @@ class TimeSeriesPage(QWidget):
             if name_item is not None:
                 out[name_item.text()] = value_item.text() if value_item is not None else ""
         return out
+
+
+# --------------------------------------------------------------------------- #
+# 9. 月度账单页（V2.1 阶段 2；规格书 §5.4、§5.5、§8.4；交接文档 §7）
+#
+# 分层（§0.2 铁律 1、2）：本页**不含任何公式**——列表、汇总、差异、平均电价、
+# 校验级别全部来自 ``cenep.application.bill_service.BillService``（其内部再委托
+# ``cenep.calculation.bill_calculator``）。界面只做三件事：取值、显示、把用户动作
+# 转成一次服务调用。
+# --------------------------------------------------------------------------- #
+#: 账单字段"未提供"的统一文案（V2.1 §2.1：``None`` ≠ ``0``，不得显示为 0）
+BILL_NOT_PROVIDED = "账单未提供"
+
+#: 「账单事实 / 模拟结果」分界横幅（§1 重要设计边界、§8.1；阶段 5/6 才有模拟结果）
+BILL_SIMULATION_NOTICE = (
+    "【账单事实 / 模拟结果分界】本页展示与编辑的全部是**账单事实**"
+    "（手动录入 / Excel 导入 / 用户明确标注的估算）；账单复算与光储方案模拟"
+    "（§3.4「电费账单复算」、§7「V2.3 湖北电价与模拟账单联动」）属于阶段 5 / 6，"
+    "本阶段**尚未建模**——凡涉及「复算电费 / 节省额 / 模拟需量」的位置一律标注"
+    "「待确认 / 未建模」，不得把账单事实当成模拟结果展示。"
+)
+
+#: 平均综合电价的口径提示（§3.1：该指标只是账单统计，不是边际节省电价）
+BILL_PRICE_CALIBER_NOTICE = (
+    "口径提示：账单平均综合电价 P_avg = 账单总额 ÷ 总购电量，**仅作账单统计**，"
+    "不等于光伏自用电量的边际节省电价（固定基本电费、需量电费、税费等未必随购电量同比例变化，§3.1）。"
+)
+
+#: 校验级别中文标签与配色（§2.1：ERROR 拒收 / WARNING 告警 / INFO 提示）
+BILL_LEVEL_LABELS: dict[str, str] = {"ERROR": "错误", "WARNING": "警告", "INFO": "提示"}
+BILL_LEVEL_COLORS: dict[str, str] = {
+    "ERROR": "#B00020",
+    "WARNING": "#B26A00",
+    "INFO": "#1F5FA8",
+}
+#: 预览行状态 → 校验级别（预览用项目自身的质量状态枚举）
+BILL_ROW_LEVELS: dict[BillQualityStatus, str] = {
+    BillQualityStatus.INVALID: "ERROR",
+    BillQualityStatus.WARNING: "WARNING",
+    BillQualityStatus.VALID: "INFO",
+}
+
+#: 排序字段的中文标签（字段本身取自 ``BillService.SORT_FIELDS``，不在界面里另立清单）
+BILL_SORT_LABELS: dict[str, str] = {
+    "period_start": "按账期起始日",
+    "billing_month": "按账单月份",
+    "bill_total_yuan": "按账单总额",
+    "energy_total_kwh": "按总购电量",
+    "created_at": "按录入时间",
+    "updated_at": "按最后修改时间",
+}
+
+#: 账单列表列标题
+BILL_LIST_HEADERS: tuple[str, ...] = (
+    "账单编号",
+    "账单月份",
+    "账期",
+    "计量点",
+    "总购电量",
+    "账单总额",
+    "数据来源",
+    "质量状态",
+)
+
+#: 表单里"空文本 = 未提供"的字段（§2.1：可空字符串字段）
+BILL_OPTIONAL_TEXT_FIELDS: tuple[str, ...] = (
+    "meter_id",
+    "customer_name",
+    "voltage_level",
+    "notes",
+)
+
+#: 空状态录入指引（§5.4、§8.2：旧项目打开后显示空状态，不虚构数据）
+BILL_EMPTY_GUIDE = (
+    "本项目尚未录入电费账单。录入方法：\n"
+    "① 手动录入：点击「新增账单」，填写账期、电量与费用分项后点击「保存账单」；\n"
+    "② 模板导入：点击「下载导入模板」得到《CENEP_电费账单导入模板.xlsx》，填写后回到"
+    "「导入向导」按六步（选文件 → 选表 → 映射列 → 预览 → 校验 → 确认）导入；\n"
+    "③ 直接导入已有的 Excel / CSV 账单表（列名可中英文，列顺序可变）。\n"
+    "已录入的账单随项目文件（.nep）一起保存，重开项目后自动恢复；旧项目没有账单时本页保持空状态，"
+    "不会自动生成任何虚构账单。"
+)
+
+#: 无账单时月度 / 年度汇总的提示
+BILL_NO_SUMMARY_HINT = "本项目尚未录入电费账单，暂无汇总数据（录入方法见「账单列表」页签）。"
+
+
+def bill_kwh(value: float | None, digits: int = 2) -> str:
+    """电量显示：``None`` → **账单未提供**（绝不显示 0，§2.1）。"""
+    return BILL_NOT_PROVIDED if value is None else f"{value:,.{digits}f} kWh"
+
+
+def bill_yuan(value: float | None, digits: int = 2) -> str:
+    """金额显示：``None`` → **账单未提供**（绝不显示 0，§2.1）。"""
+    return BILL_NOT_PROVIDED if value is None else f"{value:,.{digits}f} 元"
+
+
+def bill_price(value: float | None) -> str:
+    """平均综合电价显示：``None`` → 无法计算（账单未提供电量或金额，§3.1）。"""
+    return "无法计算（账单未提供电量或金额）" if value is None else f"{value:,.4f} 元/kWh"
+
+
+def bill_text(value: object | None) -> str:
+    """文本字段显示：``None`` / 空串 → **账单未提供**。"""
+    if value is None or not str(value).strip():
+        return BILL_NOT_PROVIDED
+    return str(value)
+
+
+def _set_table(
+    table: QTableWidget,
+    headers: list[str] | tuple[str, ...],
+    rows: list[list[str]],
+    *,
+    readonly: bool = True,
+) -> None:
+    """把二维文本写入表格（只做显示，不做任何计算）。"""
+    table.setColumnCount(len(headers))
+    table.setHorizontalHeaderLabels([str(h) for h in headers])
+    table.setRowCount(len(rows))
+    for r, row in enumerate(rows):
+        for c, text in enumerate(row):
+            table.setItem(r, c, QTableWidgetItem(str(text)))
+    if readonly:
+        _no_edit(table)
+    table.resizeColumnsToContents()
+
+
+class BillImportWizard(QWidget):
+    """账单导入向导：**六步**（V2.1 §5.3、§5.5、§8.4）。
+
+    步骤：选文件 → 选表 → 映射列 → 预览 → 校验 → 确认导入。
+
+    每一步都是一个可独立断言的状态转换（``self.step`` 与 ``self.stack`` 同步），
+    因此无需弹出任何模态对话框即可自动测试。**本类不含任何计算**：读表、列映射、
+    逐行校验、重复识别全部由 :class:`~cenep.application.bill_service.BillService`
+    完成（第 1 步的 ``list_sheets`` 只是 ``data`` 层的文件清单读取，不是计算）。
+    """
+
+    #: 六步标题（界面上的步骤条与测试断言共用）
+    STEP_TITLES: tuple[str, ...] = (
+        "1 选择文件",
+        "2 选择工作表",
+        "3 映射列",
+        "4 预览",
+        "5 校验",
+        "6 确认导入",
+    )
+
+    #: 导入完成信号（账单页据此刷新列表与汇总）
+    imported = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._service = None
+        self.step = 1
+        self.path: Path | None = None
+        self.sheet_names: list[str] = []
+        self.sheet: str | None = None
+        self.preview = None
+        self.result = None
+        self.mapping_overrides: dict[str, str] = {}
+        self.issues: list[tuple[str, str, str]] = []
+
+        layout = QVBoxLayout(self)
+        self.step_label = QLabel("", self)
+        self.step_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self.step_label)
+        self.breadcrumb = QLabel("", self)
+        self.breadcrumb.setWordWrap(True)
+        layout.addWidget(self.breadcrumb)
+        self.message_label = QLabel("", self)
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
+
+        self.stack = QStackedWidget(self)
+        layout.addWidget(self.stack, 1)
+
+        # ---- 第 1 步：选择文件 ----
+        page1 = QWidget(self)
+        p1 = QVBoxLayout(page1)
+        self.file_label = QLabel("尚未选择文件。", page1)
+        self.file_label.setWordWrap(True)
+        p1.addWidget(self.file_label)
+        self.file_button = QPushButton("选择账单文件（.xlsx / .csv）…", page1)
+        self.file_button.clicked.connect(self.choose_file)
+        p1.addWidget(self.file_button)
+        p1.addWidget(
+            QLabel(
+                "说明：模板为《CENEP_电费账单导入模板.xlsx》，工作表「月账单」一行一条账单；"
+                "列名可中英文、列顺序可变，第 3 步会显示自动识别的列映射并允许手工改判（§5.3、§5.5）。",
+                page1,
+            )
+        )
+        p1.addStretch(1)
+        self.stack.addWidget(page1)
+
+        # ---- 第 2 步：选择工作表 ----
+        page2 = QWidget(self)
+        p2 = QVBoxLayout(page2)
+        p2.addWidget(QLabel("选择账单所在的工作表：", page2))
+        self.sheet_combo = QComboBox(page2)
+        p2.addWidget(self.sheet_combo)
+        self.sheet_button = QPushButton("确认工作表，进入列映射", page2)
+        self.sheet_button.clicked.connect(lambda: self.select_sheet())
+        p2.addWidget(self.sheet_button)
+        p2.addWidget(QLabel("提示：模板中的「填写说明」「数据字典」工作表不含账单数据，请选择「月账单」。", page2))
+        p2.addStretch(1)
+        self.stack.addWidget(page2)
+
+        # ---- 第 3 步：映射列 ----
+        page3 = QWidget(self)
+        p3 = QVBoxLayout(page3)
+        p3.addWidget(
+            QLabel("自动识别的列映射（可在「识别到的列」下拉框中手工改判）：", page3)
+        )
+        self.mapping_table = QTableWidget(page3)
+        p3.addWidget(self.mapping_table, 1)
+        self.mapping_hint = QLabel("", page3)
+        self.mapping_hint.setWordWrap(True)
+        p3.addWidget(self.mapping_hint)
+        self.mapping_button = QPushButton("应用列映射，生成预览", page3)
+        self.mapping_button.clicked.connect(lambda: self.apply_mapping())
+        p3.addWidget(self.mapping_button)
+        self.stack.addWidget(page3)
+
+        # ---- 第 4 步：预览 ----
+        page4 = QWidget(self)
+        p4 = QVBoxLayout(page4)
+        self.preview_label = QLabel("", page4)
+        self.preview_label.setWordWrap(True)
+        p4.addWidget(self.preview_label)
+        self.preview_table = QTableWidget(page4)
+        p4.addWidget(self.preview_table, 1)
+        self.preview_button = QPushButton("校验（分级显示问题）", page4)
+        self.preview_button.clicked.connect(self.validate_rows)
+        p4.addWidget(self.preview_button)
+        self.stack.addWidget(page4)
+
+        # ---- 第 5 步：校验 ----
+        page5 = QWidget(self)
+        p5 = QVBoxLayout(page5)
+        self.issue_label = QLabel("", page5)
+        self.issue_label.setWordWrap(True)
+        p5.addWidget(self.issue_label)
+        self.issue_table = QTableWidget(page5)
+        p5.addWidget(self.issue_table, 1)
+        strategy_row = QHBoxLayout()
+        strategy_row.addWidget(QLabel("重复账单处理策略：", page5))
+        self.strategy_combo = QComboBox(page5)
+        for value, label in DUPLICATE_STRATEGY_CHOICES:
+            self.strategy_combo.addItem(label, value)
+        strategy_row.addWidget(self.strategy_combo, 1)
+        p5.addLayout(strategy_row)
+        self.confirm_button = QPushButton("确认导入（仅导入可导入行）", page5)
+        self.confirm_button.clicked.connect(lambda: self.confirm_import())
+        p5.addWidget(self.confirm_button)
+        self.stack.addWidget(page5)
+
+        # ---- 第 6 步：完成 ----
+        page6 = QWidget(self)
+        p6 = QVBoxLayout(page6)
+        self.result_label = QLabel("", page6)
+        self.result_label.setWordWrap(True)
+        p6.addWidget(self.result_label)
+        self.restart_button = QPushButton("继续导入下一个文件", page6)
+        self.restart_button.clicked.connect(self.reset)
+        p6.addWidget(self.restart_button)
+        p6.addStretch(1)
+        self.stack.addWidget(page6)
+
+        self._goto(1)
+
+    # ------------------------------------------------------------------ #
+    # 服务与状态
+    # ------------------------------------------------------------------ #
+    def bind(self, service) -> None:
+        """绑定账单服务（由账单页在项目切换时调用）。"""
+        self._service = service
+
+    def state(self) -> dict:
+        """当前向导状态（供测试与界面提示复用）。"""
+        preview = self.preview
+        return {
+            "step": self.step,
+            "step_title": self.STEP_TITLES[self.step - 1],
+            "file": str(self.path) if self.path else None,
+            "sheets": list(self.sheet_names),
+            "sheet": self.sheet,
+            "mapping": dict(preview.column_mapping)
+            if preview is not None
+            else dict(self.mapping_overrides),
+            "mapping_overrides": dict(self.mapping_overrides),
+            "total_rows": getattr(preview, "total_rows", 0),
+            "valid": getattr(preview, "valid_count", 0),
+            "warning": getattr(preview, "warning_count", 0),
+            "invalid": getattr(preview, "invalid_count", 0),
+            "duplicate": getattr(preview, "duplicate_count", 0),
+            "issues": list(self.issues),
+            "imported": None if self.result is None else self.result.total_written,
+        }
+
+    def reset(self) -> None:
+        """回到第 1 步并清空本次导入的全部中间状态。"""
+        self.path = None
+        self.sheet_names = []
+        self.sheet = None
+        self.preview = None
+        self.result = None
+        self.mapping_overrides = {}
+        self.issues = []
+        self.file_label.setText("尚未选择文件。")
+        self.sheet_combo.clear()
+        self.mapping_table.setRowCount(0)
+        self.preview_table.setRowCount(0)
+        self.issue_table.setRowCount(0)
+        self.preview_label.setText("")
+        self.issue_label.setText("")
+        self.result_label.setText("")
+        self._set_message("")
+        self._goto(1)
+
+    def _goto(self, step: int) -> None:
+        self.step = max(1, min(step, len(self.STEP_TITLES)))
+        self.stack.setCurrentIndex(self.step - 1)
+        self.step_label.setText(f"第 {self.step} / {len(self.STEP_TITLES)} 步：{self.STEP_TITLES[self.step - 1]}")
+        self.breadcrumb.setText(
+            "导入流程：" + " → ".join(
+                f"【{title}】" if index == self.step - 1 else title
+                for index, title in enumerate(self.STEP_TITLES)
+            )
+        )
+
+    def _set_message(self, text: str, *, ok: bool = False) -> None:
+        self.message_label.setText(text)
+        self.message_label.setStyleSheet("color: #1B7F3B;" if ok else "color: #B00020;")
+
+    def _require_service(self):
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法导入；请先在账单页打开或新建项目。")
+            return None
+        return self._service
+
+    # ------------------------------------------------------------------ #
+    # 第 1 步：选文件
+    # ------------------------------------------------------------------ #
+    def choose_file(self) -> None:
+        """弹出文件选择框（自动化测试请直接调用 :meth:`set_file`）。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择账单文件", "", "账单文件 (*.xlsx *.xlsm *.csv);;所有文件 (*)"
+        )
+        if path:
+            self.set_file(path)
+
+    def set_file(self, path: str | Path) -> bool:
+        """第 1 → 2 步：选择文件并列出工作表（§5.3）。"""
+        if self._require_service() is None:
+            return False
+        try:
+            sheets = list_sheets(path)
+        except ValidationError as exc:
+            self._set_message(f"无法读取该文件，请检查后重试：{exc}")
+            return False
+        except Exception as exc:  # 兜底：不把裸异常抛给用户（§0.2）
+            self._set_message(f"读取文件失败，请确认文件未损坏且未被占用：{exc}")
+            return False
+
+        self.path = Path(path)
+        self.sheet_names = list(sheets)
+        self.sheet = None
+        self.preview = None
+        self.mapping_overrides = {}
+        self.file_label.setText(f"已选择文件：{self.path}\n包含工作表：{'、'.join(sheets)}")
+        self.sheet_combo.clear()
+        for name in sheets:
+            self.sheet_combo.addItem(name)
+        self._set_message("")
+        self._goto(2)
+        return True
+
+    # ------------------------------------------------------------------ #
+    # 第 2 步：选表
+    # ------------------------------------------------------------------ #
+    def select_sheet(self, name: str | None = None) -> bool:
+        """第 2 → 3 步：确认工作表并读取自动列映射（§5.3）。"""
+        if self._require_service() is None:
+            return False
+        if self.path is None:
+            self._set_message("请先选择账单文件。")
+            return False
+        sheet = (name or self.sheet_combo.currentText() or "").strip()
+        if not sheet:
+            self._set_message("请选择工作表。")
+            return False
+        self.sheet = sheet
+        self.mapping_overrides = {}
+        return self.load_mapping()
+
+    def load_mapping(self, column_mapping: dict[str, str] | None = None) -> bool:
+        """读入列映射并在第 3 步展示。
+
+        两种情况都进入第 3 步（映射列）：
+
+        * 自动识别成功：显示自动识别结果，用户可以改判；
+        * 自动识别失败（列被重命名 / 缺必需列）：**改用手工映射**，
+          用「文件实际表头 + 全部账单字段」填表，让用户自己指定（§5.5
+          "支持用户重命名列，导入界面提供列映射"），并给出中文说明。
+        """
+        service = self._require_service()
+        if service is None or self.path is None or not self.sheet:
+            self._set_message("请先完成「选择文件」与「选择工作表」两步。")
+            return False
+        try:
+            preview = service.preview_import(
+                self.path, sheet=self.sheet, column_mapping=column_mapping
+            )
+        except ValidationError as exc:
+            headers = self.read_headers()
+            if not headers:
+                self._set_message(f"无法读取该工作表，请确认选择的表包含账单数据：{exc}")
+                return False
+            self.preview = None
+            self._fill_mapping_table(None, headers)
+            self.mapping_hint.setText(
+                f"自动列映射未通过：{exc}\n请在下表手工指定每列对应的账单字段，"
+                "再点击「应用列映射，生成预览」。"
+            )
+            self._goto(3)
+            return True
+        except Exception as exc:  # 兜底
+            self._set_message(f"读取账单表失败：{exc}")
+            return False
+
+        self.preview = preview
+        self._fill_mapping_table(preview)
+        self.mapping_hint.setText(
+            "未识别的列（将被忽略）："
+            + ("、".join(preview.unmapped_headers) if preview.unmapped_headers else "无")
+        )
+        self._set_message("已自动识别列映射；如需改判，请在「识别到的列」中重新选择。", ok=True)
+        self._goto(3)
+        return True
+
+    def read_headers(self) -> list[str]:
+        """读取所选工作表的表头（手工列映射用；纯文件读取，不做任何计算）。"""
+        if self.path is None or not self.sheet:
+            return []
+        try:
+            rows = read_table_from_sheet(self.path, self.sheet, with_row_numbers=True)
+        except ValidationError:
+            return []
+        if not rows:
+            return []
+        return [str(header) for header in rows[0][1].keys()]
+
+    def _fill_mapping_table(self, preview=None, headers: list[str] | None = None) -> None:
+        if headers is None:
+            headers = sorted({*preview.column_mapping.values(), *preview.unmapped_headers})
+        if preview is not None:
+            items = list(preview.column_mapping.items())
+        else:
+            items = [(column.field, "") for column in BILL_COLUMNS]
+        self.mapping_table.setColumnCount(3)
+        self.mapping_table.setHorizontalHeaderLabels(["账单字段", "识别到的列（可改判）", "字段含义"])
+        self.mapping_table.setRowCount(len(items))
+        for row, (field, header) in enumerate(items):
+            self.mapping_table.setItem(row, 0, QTableWidgetItem(field))
+            combo = QComboBox(self.mapping_table)
+            combo.addItem("（不映射）", "")
+            for candidate in headers:
+                combo.addItem(candidate, candidate)
+            index = combo.findData(header)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+            self.mapping_table.setCellWidget(row, 1, combo)
+            self.mapping_table.setItem(row, 2, QTableWidgetItem(label_of(field)))
+        self.mapping_table.resizeColumnsToContents()
+
+    def mapping_from_table(self) -> dict[str, str]:
+        """读取第 3 步表格上的手工列映射（``字段 → 表头``，空值表示不映射）。"""
+        mapping: dict[str, str] = {}
+        for row in range(self.mapping_table.rowCount()):
+            field_item = self.mapping_table.item(row, 0)
+            combo = self.mapping_table.cellWidget(row, 1)
+            if field_item is None or not isinstance(combo, QComboBox):
+                continue
+            header = combo.currentData() or ""
+            if header:
+                mapping[field_item.text()] = str(header)
+        return mapping
+
+    def set_mapping_in_table(self, mapping: dict[str, str]) -> None:
+        """把 ``字段 → 表头`` 写入第 3 步表格的下拉框（测试与"恢复自动映射"共用）。"""
+        for row in range(self.mapping_table.rowCount()):
+            field_item = self.mapping_table.item(row, 0)
+            combo = self.mapping_table.cellWidget(row, 1)
+            if field_item is None or not isinstance(combo, QComboBox):
+                continue
+            header = mapping.get(field_item.text(), "")
+            index = combo.findData(header)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+
+    # ------------------------------------------------------------------ #
+    # 第 3 → 4 步：应用映射并预览
+    # ------------------------------------------------------------------ #
+    def apply_mapping(self, overrides: dict[str, str] | None = None) -> bool:
+        """第 3 → 4 步：应用（可改判的）列映射并生成预览表（§5.5）。
+
+        手工映射路径下 ``self.preview`` 可能为空（自动识别失败），因此这里以
+        "服务能否按当前映射生成预览"为唯一判据，而不是要求先有自动识别的预览。
+        """
+        service = self._require_service()
+        if service is None:
+            return False
+        if self.path is None or not self.sheet:
+            self._set_message("请先完成「选择文件」与「选择工作表」两步。")
+            return False
+        chosen = dict(overrides) if overrides is not None else self.mapping_from_table()
+        clean = {key: value for key, value in chosen.items() if str(value or "").strip()}
+        if not clean:
+            self._set_message("请至少为账期起始日、账期结束日两个字段指定列映射。")
+            return False
+        if overrides is not None:
+            self.set_mapping_in_table(clean)
+        self.mapping_overrides = clean
+        try:
+            preview = service.preview_import(
+                self.path, sheet=self.sheet, column_mapping=clean
+            )
+        except ValidationError as exc:
+            self._set_message(f"按当前列映射无法生成预览：{exc}")
+            return False
+        except Exception as exc:
+            self._set_message(f"生成预览失败：{exc}")
+            return False
+
+        self.preview = preview
+        rows = [
+            [
+                preview.sheet_name,
+                str(row.row_number),
+                "—" if row.bill is None else row.bill.bill_id,
+                BILL_LEVEL_LABELS[BILL_ROW_LEVELS[row.status]],
+                "；".join(row.messages) if row.messages else "通过",
+                row.duplicate_of or "—",
+            ]
+            for row in preview.rows
+        ]
+        _set_table(
+            self.preview_table,
+            ["工作表", "行号", "账单编号", "级别", "问题 / 说明", "疑似重复于"],
+            rows,
+        )
+        self.preview_label.setText(
+            preview.counts_text()
+            + "\n预览只读入内存，**尚未写入项目**；点击「校验」查看分级问题，确认无误后再导入。"
+        )
+        self._set_message("预览已生成，请核对行号与问题说明。", ok=True)
+        self._goto(4)
+        return True
+
+    # ------------------------------------------------------------------ #
+    # 第 4 → 5 步：校验（ERROR / WARNING / INFO 分级）
+    # ------------------------------------------------------------------ #
+    def validate_rows(self) -> bool:
+        """第 4 → 5 步：把预览结果按 ERROR / WARNING / INFO 分级显示（§2.1、§5.5）。"""
+        if self.preview is None:
+            self._set_message("请先生成预览。")
+            return False
+        issues: list[tuple[str, str, str]] = []
+        for row in self.preview.rows:
+            level = BILL_ROW_LEVELS[row.status]
+            detail = "；".join(row.messages) if row.messages else "该行校验通过，可导入"
+            location = f"{self.preview.sheet_name} 第 {row.row_number} 行"
+            if row.bill is not None:
+                bill_id = row.bill.bill_id
+                if row.duplicate_of:
+                    detail = f"疑似重复（与 {row.duplicate_of} 的项目 + 账期 + 计量点相同）：{detail}"
+            else:
+                bill_id = "（无法解析为账单）"
+            issues.append((level, bill_id, f"{location}：{detail}"))
+        for message in self.preview.messages:
+            issues.append(("INFO", "—", f"工作表级提示：{message}"))
+
+        self.issues = issues
+        counts = {"ERROR": 0, "WARNING": 0, "INFO": 0}
+        for level, _, _ in issues:
+            counts[level] += 1
+        _set_table(
+            self.issue_table,
+            ["级别", "账单 / 位置", "说明"],
+            [[level, bill_id, text] for level, bill_id, text in issues],
+        )
+        for row, (level, _, _) in enumerate(issues):
+            item = self.issue_table.item(row, 0)
+            if item is not None:
+                item.setForeground(QColor(BILL_LEVEL_COLORS[level]))
+        self.issue_label.setText(
+            f"校验结果：错误（ERROR）{counts['ERROR']} 条、警告（WARNING）{counts['WARNING']} 条、"
+            f"提示（INFO）{counts['INFO']} 条。"
+            "错误行**不会入库**，警告行可导入但请先核对；请选择重复账单处理策略后确认导入。"
+        )
+        self._set_message("校验完成。", ok=True)
+        self._goto(5)
+        return True
+
+    # ------------------------------------------------------------------ #
+    # 第 5 → 6 步：确认导入
+    # ------------------------------------------------------------------ #
+    def confirm_import(self, strategy: str | None = None):
+        """第 5 → 6 步：按所选重复策略写入项目（§5.5）。"""
+        service = self._require_service()
+        if service is None:
+            return None
+        if self.preview is None:
+            self._set_message("请先完成预览与校验。")
+            return None
+        raw = strategy if strategy is not None else self.strategy_combo.currentData()
+        try:
+            chosen = DuplicateStrategy(str(raw))
+        except ValueError:
+            self._set_message(f"重复账单处理策略『{raw}』无效，请重新选择。")
+            return None
+        try:
+            result = service.import_bills(preview=self.preview, strategy=chosen)
+        except ValidationError as exc:
+            self._set_message(f"导入未完成：{exc}")
+            return None
+        except Exception as exc:
+            self._set_message(f"导入失败：{exc}")
+            return None
+
+        self.result = result
+        self.result_label.setText(
+            f"{result.summary_text()}\n"
+            f"重复策略：{chosen.label}；无效行（未入库）："
+            + ("、".join(str(row) for row in result.invalid_rows) if result.invalid_rows else "无")
+            + "\n导入的账单已写入项目，请及时保存项目文件（.nep）。"
+        )
+        self._set_message("导入完成。", ok=True)
+        self._goto(6)
+        self.imported.emit()
+        return result
+
+    def run_all(self, path: str | Path, sheet: str | None = None, strategy: str = "skip"):
+        """一次跑完六步（供自动化与"一键导入"使用），返回导入结果或 ``None``。"""
+        if not self.set_file(path):
+            return None
+        if not self.select_sheet(sheet):
+            return None
+        if not self.apply_mapping():
+            return None
+        if not self.validate_rows():
+            return None
+        return self.confirm_import(strategy)
+
+
+class BillsPage(QWidget):
+    """月度账单页（V2.1 §5.4）：账单列表 / 录入编辑 / 月度汇总 / 年度汇总 / 校验提示 / 导入向导。
+
+    **不含任何计算**：所有数值来自 :class:`~cenep.application.bill_service.BillService`
+    （``list_bills`` / ``monthly_summary`` / ``annual_summary`` / ``reconcile_all`` /
+    ``month_summary`` …）。界面只负责取值、显示与把用户动作转成服务调用。
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._service = None
+        self._editing_id: str | None = None
+        self._row_bill_ids: list[str] = []
+
+        layout = QVBoxLayout(self)
+
+        banner = QLabel(BILL_SIMULATION_NOTICE, self)
+        banner.setWordWrap(True)
+        banner.setStyleSheet("background-color: #FFF2CC; border: 1px solid #E0C060; padding: 6px;")
+        layout.addWidget(banner)
+        self.banner = banner
+
+        price_notice = QLabel(BILL_PRICE_CALIBER_NOTICE, self)
+        price_notice.setWordWrap(True)
+        price_notice.setStyleSheet("color: #555555;")
+        layout.addWidget(price_notice)
+
+        # ---- 工具条 ----
+        toolbar = QHBoxLayout()
+        self.new_button = QPushButton("新增账单", self)
+        self.new_button.clicked.connect(self.new_bill)
+        toolbar.addWidget(self.new_button)
+        self.save_button = QPushButton("保存账单", self)
+        self.save_button.clicked.connect(self.save_form)
+        toolbar.addWidget(self.save_button)
+        self.copy_button = QPushButton("复制上月", self)
+        self.copy_button.clicked.connect(self.copy_previous_month)
+        toolbar.addWidget(self.copy_button)
+        self.delete_button = QPushButton("删除所选", self)
+        self.delete_button.clicked.connect(lambda: self.delete_selected())
+        toolbar.addWidget(self.delete_button)
+        self.clear_button = QPushButton("清空全部账单", self)
+        self.clear_button.clicked.connect(lambda: self.clear_all())
+        toolbar.addWidget(self.clear_button)
+        toolbar.addStretch(1)
+        self.template_button = QPushButton("下载导入模板", self)
+        self.template_button.clicked.connect(lambda: self.download_template())
+        toolbar.addWidget(self.template_button)
+        layout.addLayout(toolbar)
+
+        self.message_label = QLabel("", self)
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
+
+        self.tabs = QTabWidget(self)
+        layout.addWidget(self.tabs, 1)
+
+        self._build_list_tab()
+        self._build_form_tab()
+        self._build_monthly_tab()
+        self._build_annual_tab()
+        self._build_validation_tab()
+        self._build_wizard_tab()
+        self.refresh()
+
+    # ------------------------------------------------------------------ #
+    # 各页签
+    # ------------------------------------------------------------------ #
+    def _build_list_tab(self) -> None:
+        page = QWidget(self)
+        box = QVBoxLayout(page)
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel("月份筛选：", page))
+        self.month_combo = QComboBox(page)
+        self.month_combo.currentIndexChanged.connect(lambda _: self.refresh())
+        filters.addWidget(self.month_combo)
+        filters.addWidget(QLabel("排序：", page))
+        self.sort_combo = QComboBox(page)
+        for field in SORT_FIELDS:
+            self.sort_combo.addItem(BILL_SORT_LABELS.get(field, field), field)
+        self.sort_combo.currentIndexChanged.connect(lambda _: self.refresh())
+        filters.addWidget(self.sort_combo)
+        self.descending_check = QCheckBox("倒序", page)
+        self.descending_check.toggled.connect(lambda _: self.refresh())
+        filters.addWidget(self.descending_check)
+        self.edit_button = QPushButton("编辑所选账单", page)
+        self.edit_button.clicked.connect(self.edit_selected)
+        filters.addWidget(self.edit_button)
+        filters.addStretch(1)
+        box.addLayout(filters)
+
+        self.list_table = QTableWidget(page)
+        _no_edit(self.list_table)
+        box.addWidget(self.list_table, 1)
+
+        self.empty_label = QLabel(BILL_EMPTY_GUIDE, page)
+        self.empty_label.setWordWrap(True)
+        self.empty_label.setStyleSheet("color: #8A5A00;")
+        box.addWidget(self.empty_label)
+
+        self.list_hint = QLabel("", page)
+        self.list_hint.setWordWrap(True)
+        box.addWidget(self.list_hint)
+        self.tabs.addTab(page, "账单列表")
+
+    def _build_form_tab(self) -> None:
+        page = QWidget(self)
+        box = QVBoxLayout(page)
+        self.form_hint = QLabel(
+            "录入提示：不需要填写的分项请**不要勾选**「填写」，未勾选表示『账单未提供』"
+            "（不会按 0 参与合计，§2.1）；保存前会做中文校验并给出差异提示。",
+            page,
+        )
+        self.form_hint.setWordWrap(True)
+        box.addWidget(self.form_hint)
+        self.forms: dict[str, SectionForm] = {}
+        for section in BILL_SECTIONS:
+            group = QGroupBox(section.title, page)
+            group_layout = QVBoxLayout(group)
+            form = SectionForm(section, group)
+            self.forms[section.title] = form
+            group_layout.addWidget(form)
+            box.addWidget(group)
+        self.form_status = QLabel("", page)
+        self.form_status.setWordWrap(True)
+        box.addWidget(self.form_status)
+        box.addStretch(1)
+        self.tabs.addTab(page, "录入 / 编辑")
+
+    def _build_monthly_tab(self) -> None:
+        page = QWidget(self)
+        box = QVBoxLayout(page)
+        self.monthly_hint = QLabel(BILL_PRICE_CALIBER_NOTICE, page)
+        self.monthly_hint.setWordWrap(True)
+        box.addWidget(self.monthly_hint)
+        self.monthly_table = QTableWidget(page)
+        _no_edit(self.monthly_table)
+        box.addWidget(self.monthly_table, 1)
+        self.monthly_notes = QPlainTextEdit(page)
+        self.monthly_notes.setReadOnly(True)
+        self.monthly_notes.setMaximumHeight(90)
+        box.addWidget(self.monthly_notes)
+        self.tabs.addTab(page, "月度汇总")
+
+    def _build_annual_tab(self) -> None:
+        page = QWidget(self)
+        box = QVBoxLayout(page)
+        self.annual_table = QTableWidget(page)
+        _no_edit(self.annual_table)
+        box.addWidget(self.annual_table, 1)
+        self.annual_notes = QPlainTextEdit(page)
+        self.annual_notes.setReadOnly(True)
+        self.annual_notes.setMaximumHeight(130)
+        box.addWidget(self.annual_notes)
+        self.tabs.addTab(page, "年度汇总")
+
+    def _build_validation_tab(self) -> None:
+        page = QWidget(self)
+        box = QVBoxLayout(page)
+        self.validation_label = QLabel("", page)
+        self.validation_label.setWordWrap(True)
+        box.addWidget(self.validation_label)
+        self.validation_table = QTableWidget(page)
+        _no_edit(self.validation_table)
+        box.addWidget(self.validation_table, 1)
+        box.addWidget(QLabel("口径与假设（来自账单校验的 assumptions，§3.1）：", page))
+        self.assumptions_view = QPlainTextEdit(page)
+        self.assumptions_view.setReadOnly(True)
+        self.assumptions_view.setMaximumHeight(130)
+        box.addWidget(self.assumptions_view)
+        self.tabs.addTab(page, "校验提示")
+
+    def _build_wizard_tab(self) -> None:
+        page = QWidget(self)
+        box = QVBoxLayout(page)
+        box.addWidget(
+            QLabel(
+                "导入向导（六步）：选文件 → 选表 → 映射列 → 预览 → 校验 → 确认导入（§5.3、§5.5、§8.4）。",
+                page,
+            )
+        )
+        self.wizard = BillImportWizard(page)
+        self.wizard.imported.connect(self.refresh)
+        box.addWidget(self.wizard, 1)
+        self.tabs.addTab(page, "导入向导")
+
+    # ------------------------------------------------------------------ #
+    # 服务
+    # ------------------------------------------------------------------ #
+    def bind(self, service) -> None:
+        """绑定账单服务（由主窗口在项目切换 / 打开后调用）并刷新全部展示。"""
+        self._service = service
+        self._editing_id = None
+        if service is not None:
+            self.wizard.bind(service)
+        self.refresh()
+
+    @property
+    def service(self):
+        return self._service
+
+    def _set_message(self, text: str, *, ok: bool = False) -> None:
+        self.message_label.setText(text)
+        self.message_label.setStyleSheet("color: #1B7F3B;" if ok else "color: #B00020;")
+
+    def refresh(self) -> None:
+        """重新读取服务数据并刷新列表 / 汇总 / 校验（无账单时显示录入指引且不报错）。"""
+        if self._service is None:
+            _set_table(self.list_table, BILL_LIST_HEADERS, [])
+            self.empty_label.setText("尚未绑定项目与账单服务（请先新建或打开项目）。")
+            self.empty_label.show()
+            self.list_hint.setText("")
+            _set_table(self.monthly_table, ["月份", "账单条数"], [])
+            _set_table(self.annual_table, ["项目", "取值"], [])
+            self.monthly_notes.setPlainText(BILL_NO_SUMMARY_HINT)
+            self.annual_notes.setPlainText(BILL_NO_SUMMARY_HINT)
+            _set_table(self.validation_table, ["级别", "账单", "说明"], [])
+            self.validation_label.setText(BILL_NO_SUMMARY_HINT)
+            self.assumptions_view.setPlainText("")
+            return
+        try:
+            self._refresh_month_combo()
+            self._refresh_list()
+            self._refresh_monthly()
+            self._refresh_annual()
+            self._refresh_validation()
+        except ValidationError as exc:  # 中文校验错误，绝不裸抛给用户（§0.2）
+            self._set_message(f"账单数据读取失败：{exc}")
+        except Exception as exc:  # 兜底
+            self._set_message(f"账单页面刷新失败：{exc}")
+
+    def _refresh_month_combo(self) -> None:
+        current = self.month_combo.currentData() if self.month_combo.count() else None
+        months = list(self._service.month_coverage().keys())
+        self.month_combo.blockSignals(True)
+        self.month_combo.clear()
+        self.month_combo.addItem("全部月份", None)
+        for month in months:
+            self.month_combo.addItem(month, month)
+        index = self.month_combo.findData(current) if current else 0
+        self.month_combo.setCurrentIndex(max(index, 0))
+        self.month_combo.blockSignals(False)
+
+    def _refresh_list(self) -> None:
+        month = self.month_combo.currentData()
+        sort_by = self.sort_combo.currentData() or SORT_FIELDS[0]
+        bills = self._service.list_bills(
+            month=month, sort_by=sort_by, descending=self.descending_check.isChecked()
+        )
+        rows: list[list[str]] = []
+        self._row_bill_ids = []
+        for bill in bills:
+            period = f"{bill.billing_period_start:%Y-%m-%d} ~ {bill.billing_period_end:%Y-%m-%d}"
+            if bill.is_cross_month:
+                period = f"{period}（跨月账期）"
+            rows.append(
+                [
+                    bill.bill_id,
+                    bill.billing_month,
+                    period,
+                    bill_text(bill.meter_id),
+                    bill_kwh(bill.energy_total_kwh),
+                    bill_yuan(bill.bill_total_yuan),
+                    bill.source_type.label,
+                    bill.quality_status.label,
+                ]
+            )
+            self._row_bill_ids.append(bill.bill_id)
+        _set_table(self.list_table, BILL_LIST_HEADERS, rows)
+
+        total = len(self._service)
+        if total == 0:
+            self.empty_label.setText(BILL_EMPTY_GUIDE)
+            self.empty_label.show()
+            self.list_hint.setText("当前没有账单记录（0 条）。")
+        else:
+            self.empty_label.hide()
+            missing = sum(
+                1
+                for bill in bills
+                if bill.energy_total_kwh is None or bill.bill_total_yuan is None
+            )
+            self.list_hint.setText(
+                f"共 {total} 条账单，当前筛选显示 {len(bills)} 条；"
+                f"其中 {missing} 条存在『账单未提供』的电量或金额字段"
+                "（显示为“账单未提供”，不按 0 计算）。"
+            )
+
+    def _refresh_monthly(self) -> None:
+        summaries = self._service.monthly_summary()
+        if not summaries:
+            _set_table(
+                self.monthly_table,
+                ["月份", "账单条数", "总购电量", "账单总额", "平均综合电价", "跨月", "质量状态"],
+                [],
+            )
+            self.monthly_notes.setPlainText(BILL_NO_SUMMARY_HINT)
+            return
+        rows = [
+            [
+                item.billing_month,
+                str(item.bill_count),
+                bill_kwh(item.energy_total_kwh),
+                bill_yuan(item.amount_total_yuan),
+                bill_price(item.average_price_yuan_per_kwh),
+                "是" if item.has_cross_month else "否",
+                item.quality_status.label,
+            ]
+            for item in summaries
+        ]
+        _set_table(
+            self.monthly_table,
+            ["月份", "账单条数", "总购电量", "账单总额", "平均综合电价", "跨月", "质量状态"],
+            rows,
+        )
+        notes: list[str] = []
+        for item in summaries:
+            for message in item.messages:
+                notes.append(f"{item.billing_month}：{message}")
+        self.monthly_notes.setPlainText(
+            "\n".join(notes) if notes else "各月账单分项合计与总电量校验未发现问题。"
+        )
+
+    def _refresh_annual(self) -> None:
+        summary = self._service.annual_summary()
+        rows = [
+            ["统计年度", str(summary.year)],
+            ["覆盖月份数", f"{len(summary.months_covered)} / 12"],
+            ["月份覆盖率", f"{summary.coverage_ratio:.2%}"],
+            ["年度总购电量", bill_kwh(summary.total_energy_kwh)],
+            ["年度账单总额", bill_yuan(summary.total_amount_yuan)],
+            ["平均综合电价", bill_price(summary.average_price_yuan_per_kwh)],
+            ["是否可直接相加", "是" if summary.can_sum_directly else "否（缺月 / 重叠 / 跨月或非自然月）"],
+            [
+                "数值口径",
+                "年度电量与电费只在「每月账单周期完整且不重叠」时可直接相加（§3.1）",
+            ],
+            [
+                "跨月账期账单",
+                "、".join(summary.cross_month_bills) if summary.cross_month_bills else "无",
+            ],
+            [
+                "非自然月账期账单",
+                "、".join(summary.non_natural_month_bills) if summary.non_natural_month_bills else "无",
+            ],
+            [
+                "同月多条账单",
+                "、".join(summary.duplicate_months) if summary.duplicate_months else "无",
+            ],
+            [
+                "缺失月份",
+                "、".join(summary.missing_months) if summary.missing_months else "无（12 个月齐全）",
+            ],
+            ["模拟账单（阶段 5/6）", "待确认 / 未建模：本阶段不做账单复算与光储方案模拟"],
+        ]
+        _set_table(self.annual_table, ["项目", "取值"], rows)
+        notes = [*summary.messages, *summary.assumptions]
+        self.annual_notes.setPlainText(
+            "\n".join(notes) if notes else BILL_NO_SUMMARY_HINT
+        )
+
+    def _refresh_validation(self) -> None:
+        outcomes = self._service.reconcile_all()
+        rows: list[list[str]] = []
+        for item in outcomes:
+            if not item.issues:
+                rows.append(["INFO", item.bill_id, "未发现问题（合计与分项一致或无法判断）"])
+            for issue in item.issues:
+                field = label_of(issue.field) if issue.field else "—"
+                rows.append(
+                    [
+                        issue.level,
+                        item.bill_id,
+                        f"[{issue.code or '—'}] {field}：{issue.message}",
+                    ]
+                )
+        if not rows:
+            _set_table(
+                self.validation_table,
+                ["级别", "账单", "说明"],
+                [],
+            )
+            self.validation_label.setText(BILL_NO_SUMMARY_HINT)
+            self.assumptions_view.setPlainText("")
+            return
+        _set_table(self.validation_table, ["级别", "账单", "说明"], rows)
+        counts = {"ERROR": 0, "WARNING": 0, "INFO": 0}
+        for row in rows:
+            counts[row[0]] = counts.get(row[0], 0) + 1
+        self.validation_label.setText(
+            f"共核对 {len(outcomes)} 条账单：错误（ERROR）{counts['ERROR']} 条、"
+            f"警告（WARNING）{counts['WARNING']} 条、提示（INFO）{counts['INFO']} 条。"
+            "错误级别会在保存时拒绝入库；警告级别只提示差异，不隐藏差异数值（§2.1）。"
+        )
+        for row, (level, _, _) in enumerate(rows):
+            item = self.validation_table.item(row, 0)
+            if item is not None:
+                item.setForeground(QColor(BILL_LEVEL_COLORS.get(level, "#000000")))
+        assumptions: list[str] = [BILL_PRICE_CALIBER_NOTICE]
+        for item in outcomes:
+            for text in item.assumptions:
+                assumptions.append(f"{item.bill_id}：{text}")
+            for text in item.messages:
+                assumptions.append(f"{item.bill_id}：{text}")
+        self.assumptions_view.setPlainText("\n".join(dict.fromkeys(assumptions)))
+
+    # ------------------------------------------------------------------ #
+    # 录入 / 编辑 / 删除 / 复制（§5.4）
+    # ------------------------------------------------------------------ #
+    def new_bill(self) -> None:
+        """清空表单，准备录入一条新账单（账期默认取本月自然月）。"""
+        self._editing_id = None
+        today = date.today()
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        for form in self.forms.values():
+            for path, row in form.rows.items():
+                row.set_value(None)
+        self.forms[BILL_SECTIONS[0].title].rows["billing_period_start"].set_value(
+            date(today.year, today.month, 1)
+        )
+        self.forms[BILL_SECTIONS[0].title].rows["billing_period_end"].set_value(
+            date(today.year, today.month, last_day)
+        )
+        self.form_status.setText("正在录入新账单（尚未保存）。填写完成后点击「保存账单」。")
+        self.tabs.setCurrentIndex(1)
+
+    def clear_form(self) -> None:
+        """清空表单并退出编辑状态（不触碰项目里已保存的账单）。"""
+        self._editing_id = None
+        for form in self.forms.values():
+            for row in form.rows.values():
+                row.set_value(None)
+        self.form_status.setText("表单已清空（项目中的账单未受影响）。")
+
+    def form_payload(self) -> dict:
+        """读取表单值：未勾选「填写」的可空字段为 ``None``（= 账单未提供，§2.1）。"""
+        payload: dict[str, object] = {}
+        for form in self.forms.values():
+            for path, row in form.rows.items():
+                value = row.value()
+                if path in BILL_OPTIONAL_TEXT_FIELDS and isinstance(value, str):
+                    value = value.strip() or None
+                payload[path] = value
+        return payload
+
+    def form_values(self) -> dict:
+        """表单当前值（供测试断言"界面显示 = 服务返回"）。"""
+        return dict(self.form_payload())
+
+    def load_bill_into_form(self, bill: ElectricityBill | str) -> None:
+        """把一条账单（对象或 ID）读入表单，进入编辑状态。"""
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法编辑账单。")
+            return
+        if isinstance(bill, str):
+            try:
+                target = self._service.get_bill(bill)
+            except ValidationError as exc:
+                self._set_message(str(exc))
+                return
+        else:
+            target = bill
+        self._editing_id = target.bill_id
+        for form in self.forms.values():
+            for path, row in form.rows.items():
+                row.set_value(getattr(target, path, None))
+        self.form_status.setText(
+            f"正在编辑账单 {target.bill_id}"
+            f"（来源：{target.source_type.label}；质量状态：{target.quality_status.label}；"
+            f"账单事实，不含任何模拟结果）。账单编号与创建时间不可修改。"
+        )
+        self.tabs.setCurrentIndex(1)
+
+    def save_form(self):
+        """保存表单（新增或更新）。校验失败时给出**中文**提示且不入库（§0.2）。"""
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法保存账单。")
+            return None
+        payload = self.form_payload()
+        try:
+            if self._editing_id:
+                bill = self._service.update_bill(self._editing_id, payload)
+                action = "已更新"
+            else:
+                bill = self._service.create_bill(**payload)
+                self._editing_id = bill.bill_id
+                action = "已新增"
+        except ValidationError as exc:
+            self._set_message(f"账单未通过校验，未保存：{exc}")
+            return None
+        except Exception as exc:  # 兜底：不把裸异常抛给用户
+            self._set_message(f"保存账单失败：{exc}")
+            return None
+
+        self._set_message(f"{action}账单 {bill.bill_id}（{bill.billing_month}）。", ok=True)
+        self.form_status.setText(
+            f"{action}账单 {bill.bill_id}：{bill.describe()}"
+        )
+        self.refresh()
+        return bill
+
+    def selected_bill_id(self) -> str | None:
+        """列表当前选中的账单编号（未选中返回 ``None``）。"""
+        row = self.list_table.currentRow()
+        if 0 <= row < len(self._row_bill_ids):
+            return self._row_bill_ids[row]
+        return None
+
+    def edit_selected(self) -> None:
+        bill_id = self.selected_bill_id()
+        if bill_id is None:
+            self._set_message("请先在「账单列表」中选中一条账单。")
+            return
+        self.load_bill_into_form(bill_id)
+
+    def delete_selected(self, confirm: bool = True) -> bool:
+        """删除所选账单（默认先弹中文确认框，§5.4）。"""
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法删除账单。")
+            return False
+        bill_id = self.selected_bill_id()
+        if bill_id is None:
+            self._set_message("请先在「账单列表」中选中一条账单。")
+            return False
+        if confirm:
+            answer = QMessageBox.question(
+                self,
+                "删除确认",
+                f"确定删除账单 {bill_id} 吗？删除后无法撤销（需重新录入或导入）。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self._set_message("已取消删除。")
+                return False
+        try:
+            removed = self._service.delete_bill(bill_id)
+        except ValidationError as exc:
+            self._set_message(str(exc))
+            return False
+        if self._editing_id == bill_id:
+            self._editing_id = None
+        self._set_message(f"已删除账单 {removed.bill_id}。", ok=True)
+        self.refresh()
+        return True
+
+    def copy_previous_month(self):
+        """复制上一条账单到下一个月（§5.4）。"""
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法复制账单。")
+            return None
+        month = self.month_combo.currentData()
+        if not month:
+            latest = self._service.list_bills(sort_by="billing_month", descending=True)
+            if not latest:
+                self._set_message("当前项目没有账单可复制，请先手动录入或导入账单。")
+                return None
+            month = _next_month(latest[0].billing_month)
+        try:
+            copied = self._service.copy_previous_month(month)
+        except ValidationError as exc:
+            self._set_message(f"复制失败：{exc}")
+            return None
+        self._set_message(f"已复制生成账单 {copied.bill_id}（{copied.billing_month}）。", ok=True)
+        self.refresh()
+        return copied
+
+    def clear_all(self, confirm: bool = True) -> bool:
+        """清空全部账单（危险操作，默认二次确认）。"""
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法清空账单。")
+            return False
+        if confirm:
+            answer = QMessageBox.warning(
+                self,
+                "清空确认",
+                "确定清空本项目全部账单吗？删除后无法撤销（需重新录入或导入）。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self._set_message("已取消清空。")
+                return False
+        count = self._service.clear()
+        self._editing_id = None
+        self._set_message(f"已清空 {count} 条账单。", ok=True)
+        self.refresh()
+        return True
+
+    # ------------------------------------------------------------------ #
+    # 模板与导入（§5.3）
+    # ------------------------------------------------------------------ #
+    def download_template(self, target: str | Path | None = None) -> Path | None:
+        """下载账单导入模板（§5.3）。
+
+        :param target: 目标文件或目录；``None`` 时弹出"另存为"对话框。
+            后缀处理用 ``with_name(name + 后缀)``：项目名常含 ``2061.8kWp`` 这类小数点。
+        """
+        if self._service is None:
+            self._set_message("尚未绑定账单服务，无法下载模板。")
+            return None
+        path = Path(target) if target is not None else None
+        if path is None:
+            chosen, _ = QFileDialog.getSaveFileName(
+                self, "保存账单导入模板", "CENEP_电费账单导入模板.xlsx", "Excel (*.xlsx)"
+            )
+            if not chosen:
+                self._set_message("已取消下载模板。")
+                return None
+            path = Path(chosen)
+        if path.suffix.lower() != ".xlsx":
+            path = path.with_name(path.name + ".xlsx")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(self._service.template_bytes())
+        except OSError as exc:
+            self._set_message(f"写入模板文件失败：{exc}")
+            return None
+        self._set_message(f"已下载导入模板：{path}", ok=True)
+        return path
+
+    # ------------------------------------------------------------------ #
+    # 测试辅助（只读）
+    # ------------------------------------------------------------------ #
+    def list_rows(self) -> list[list[str]]:
+        """账单列表的二维文本（供测试断言显示口径，如"账单未提供"）。"""
+        return [
+            [
+                self.list_table.item(r, c).text() if self.list_table.item(r, c) else ""
+                for c in range(self.list_table.columnCount())
+            ]
+            for r in range(self.list_table.rowCount())
+        ]
+
+    def list_headers(self) -> list[str]:
+        return [
+            self.list_table.horizontalHeaderItem(c).text()
+            for c in range(self.list_table.columnCount())
+        ]
+
+    def monthly_rows(self) -> list[list[str]]:
+        return [
+            [
+                self.monthly_table.item(r, c).text() if self.monthly_table.item(r, c) else ""
+                for c in range(self.monthly_table.columnCount())
+            ]
+            for r in range(self.monthly_table.rowCount())
+        ]
+
+    def annual_values(self) -> dict[str, str]:
+        return self._table_map(self.annual_table)
+
+    def validation_rows(self) -> list[list[str]]:
+        return [
+            [
+                self.validation_table.item(r, c).text() if self.validation_table.item(r, c) else ""
+                for c in range(self.validation_table.columnCount())
+            ]
+            for r in range(self.validation_table.rowCount())
+        ]
+
+    def validation_levels(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in self.validation_rows():
+            if row:
+                counts[row[0]] = counts.get(row[0], 0) + 1
+        return counts
+
+    def wizard_state(self) -> dict:
+        return self.wizard.state()
+
+    @staticmethod
+    def _table_map(table: QTableWidget) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for r in range(table.rowCount()):
+            name_item = table.item(r, 0)
+            value_item = table.item(r, 1)
+            if name_item is not None:
+                out[name_item.text()] = value_item.text() if value_item is not None else ""
+        return out
+
+
+def _next_month(month: str) -> str:
+    """``YYYY-MM`` 的下一个月（只做字符串进位，不涉及任何业务计算）。"""
+    year, number = (int(part) for part in month.split("-"))
+    return f"{year + 1}-01" if number == 12 else f"{year}-{number + 1:02d}"

@@ -1,7 +1,8 @@
-"""主窗口：七个页面 + 应用服务编排（规范 §97、§125、§148）。
+"""主窗口：页面工作区 + 应用服务编排（规范 §97、§125、§148；V2.1 §5.4）。
 
 主窗口是**唯一**知道"如何把界面动作变成一次计算"的地方：
-它只调用 :class:`ProjectService` 与 :class:`CalculationService`，自身不含任何公式。
+它只调用 :class:`ProjectService`、:class:`CalculationService` 与账单服务
+（``ProjectService.bill_service()``），自身不含任何公式。
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from ..policy.store import PolicyStore
 from ..reports.excel_exporter import ExcelExporter
 from ..reports.pdf_exporter import PdfExporter
 from .pages import (
+    BillsPage,
     CalculatePage,
     ParametersPage,
     ProjectPage,
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
         self.calculate_page = CalculatePage(self.tabs)
         self.result_page = ResultPage(self.tabs)
         self.timeseries_page = TimeSeriesPage(self.tabs)
+        self.bills_page = BillsPage(self.tabs)  # V2.1 阶段 2：账单页（§5.4）
         self.sensitivity_page = SensitivityPage(self.tabs)
         self.report_page = ReportPage(self.tabs)
         self.settings_page = SettingsPage(self.tabs)
@@ -107,6 +110,9 @@ class MainWindow(QMainWindow):
             (self.calculate_page, "计算"),
             (self.result_page, "结果"),
             (self.timeseries_page, "时序仿真"),
+            # V2.1 §5.4「用电与电费 → 月度账单」：紧跟时序仿真（同属数据输入），
+            # **既有 8 个页面的标题与相对顺序一字未改**。
+            (self.bills_page, "月度账单"),
             (self.sensitivity_page, "敏感性"),
             (self.report_page, "报告"),
             (self.settings_page, "设置"),
@@ -138,10 +144,17 @@ class MainWindow(QMainWindow):
         self.project_page.set_recent(self.project_service.recent_projects())
         self.calculate_page.status_label.setText("尚未计算")
         self.result_page.clear()
+        # V2.1 §5.4：账单页经 ProjectService 装配账单服务（服务里再委托计算层），
+        # 界面不自行拼装、更不自己算（§0.2）。
+        self.bills_page.bind(self.project_service.bill_service(self.project))
         self.statusBar().showMessage(self.policy_store.startup_notice(self.project))
 
     def collect_project(self) -> tuple[Project, list[str]]:
-        """把界面上的值写回项目（返回项目与错误列表）。"""
+        """把界面上的值写回项目（返回项目与错误列表）。
+
+        账单事实由 :class:`BillsPage` 通过 :class:`BillService` **直接写入** ``project.bills``
+        （每次录入 / 导入立即生效），因此这里不需要、也不允许再"搬运"一次。
+        """
         errors: list[str] = []
         errors.extend(self.project_page.apply(self.project))
         errors.extend(self.parameters_page.apply(self.project))

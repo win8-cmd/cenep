@@ -1,13 +1,16 @@
 # 报告规范（REPORT_SPEC）
 
-> **当前状态（V2）：Excel **24 张工作表**（V1 §108 的 13 张 + V2 §67 新增 11 张）与 PDF **16 部分**（V2 §66，含 6 个时序章节与 3 张图表）均已实现。**
-> **本文档为 Phase 6 / Phase 7 的实现依据与现状记录。**
-> **状态快照日期**：2026-10-06
+> **当前状态（V2.1 阶段 2）：Excel **26 张工作表**（V1 §108 的 13 张 + V2 §67 新增 11 张 +
+> V2.1 §8.1 新增 2 张账单表）与 PDF **17 部分**（V2 §66 的 16 部分 + V2.1 §8.1 新增
+> 「账单事实与校验」，含 6 个时序章节与 3 张图表）均已实现。**
+> **本文档为 Phase 6 / Phase 7 与 V2.1 阶段 2 的实现依据与现状记录。**
+> **状态快照日期**：2026-10-06（V2.1 阶段 2 更新）
 > **引用条款**：§35、§80、§81、§83、§87、§91、§105、§108–§111、§144、§148–§150、§154、§161
 > （本文件正文中的表格与列表为紧凑起见以"§X"简写，凡引用产品规范条款处均指产品规范 §X）
 >
 > **三条铁律（§109、§148–§150）**
-> 1. Excel 与 PDF 的**全部数据必须来自 `CalculationResult`**（以及 `Project` 的输入参数用于展示）；
+> 1. Excel 与 PDF 的**全部数据必须来自 `CalculationResult`**（以及 `Project` 的输入参数用于展示；
+>    V2.1 起含 `Project.bills` 账单段与账单服务 `BillService` **已算好**的核对结果）；
 > 2. Excel 与 PDF **一律不得重新计算**任何指标；
 > 3. 可以展示**公式文本**，但展示的结果值必须与软件计算结果显示一致（`GUI = Excel = PDF = CalculationResult`）。
 
@@ -20,19 +23,19 @@
 | 文档名称 | Excel / PDF 报告规范 |
 | 文档标识 | `REPORT_SPEC.md` |
 | 目标阶段 | Phase 6（Excel，已实现）、Phase 7（PDF，已实现，快照进行中） |
-| Excel 实现文件 | `src/cenep/reports/excel_exporter.py`（`ExcelExporter.export(project, result, path)`） |
-| PDF 实现文件 | `src/cenep/reports/pdf_exporter.py`（`PdfExporter.export(project, result, path)`，reportlab，16 部分 + 3 张图表） |
-| 测试 | `tests/test_excel_export.py`、`tests/test_pdf_export.py`（⬜ 撰写本文件时仍有失败项待修复） |
-| 数据源 | `CalculationResult`（唯一结果对象，`src/cenep/domain/results.py`） |
+| Excel 实现文件 | `src/cenep/reports/excel_exporter.py`（`ExcelExporter.export(project, result, path)`，26 张工作表） |
+| PDF 实现文件 | `src/cenep/reports/pdf_exporter.py`（`PdfExporter.export(project, result, path)`，reportlab，17 部分 + 3 张图表） |
+| 测试 | `tests/test_excel_export.py`、`tests/test_pdf_export.py`、`tests/test_report_v2.py`、`tests/test_bill_ui_report.py` |
+| 数据源 | `CalculationResult`（唯一结果对象，`src/cenep/domain/results.py`）；账单事实取自 `Project.bills`，校验明细取自 `BillService.reconcile_all()` |
 
 ### 1.1 实现状态总览
 
 | 输出 | 结构 | 当前状态 |
 |---|---|---|
-| Excel | **24 张**工作表（V1 §108 的 13 张 + V2 §67 新增 11 张） | ✅ 已实现 |
+| Excel | **26 张**工作表（V1 §108 的 13 张 + V2 §67 的 11 张 + V2.1 §8.1 的 2 张账单表） | ✅ 已实现 |
 | Excel 参数来源着色 | 按 `SourceType` 着色（§144） | ✅ 已实现 |
-| Excel 一致性测试 | Excel ↔ `CalculationResult` | ⚠️ 已建立测试，⬜ 待全绿 |
-| PDF | **16 部分** + 免责声明（V2 §66、V1 §111） | ✅ 已实现 |
+| Excel 一致性测试 | Excel ↔ `CalculationResult` | ✅ 已建立并全绿 |
+| PDF | **17 部分** + 免责声明（V2 §66 + V2.1 §8.1、V1 §111） | ✅ 已实现 |
 | PDF 页眉页脚与页码 | 见第 3 节 | ✅ **已实现（快照进行中）** |
 | PDF 政策版本提示位 | 见 3.4 | ✅ **已实现（快照进行中）** |
 
@@ -40,9 +43,10 @@
 
 ## 2. Excel 输出设计（§108、§109）
 
-### 2.1 工作表总览（V2 起为 24 张）
+### 2.1 工作表总览（V2.1 阶段 2 起为 26 张）
 
-V2 §67 要求「至少包含」若干类内容，因此工作表在 V1 §108 的 13 张基础上**新增 11 张**：
+V2 §67 要求「至少包含」若干类内容，因此工作表在 V1 §108 的 13 张基础上**新增 11 张**；
+V2.1 §8.1（阶段 2）再**新增 2 张账单表**（`账单原始数据`、`账单校验`），合计 **26 张**。
 
 | V2 §67 要求 | 表名 | 与 V1 的关系 |
 |---|---|---|
@@ -61,8 +65,12 @@ V2 §67 要求「至少包含」若干类内容，因此工作表在 V1 §108 �
 | Sensitivity | 敏感性分析 | V1 原有 |
 | Policy Basis / Parameter Sources | 政策依据 / 参数来源 | V1 原有 |
 | Data Quality | **数据质量** | 新增 |
+| V2.1 §8.1 Bill Facts | **账单原始数据** | V2.1 阶段 2 新增 |
+| V2.1 §8.1 Bill Check | **账单校验** | V2.1 阶段 2 新增 |
 
-**V1 兼容性**：新增表在未启用时序仿真时输出「本项目未启用时序仿真」说明与启用方法，**不缺表、不报错**；配置类表（储能与调度、分时电价）与年度汇总表在 V1 项目下照常输出真实内容。
+**V1 兼容性**：新增表在未启用时序仿真时输出「本项目未启用时序仿真」说明与启用方法，
+在**没有账单**时输出「本项目尚未录入电费账单」与三种录入方法，**不缺表、不报错**；
+配置类表（储能与调度、分时电价）与年度汇总表在 V1 项目下照常输出真实内容。
 
 **以下为 V1 的 13 张表（V2 全部保留）**
 
@@ -416,6 +424,33 @@ V2 §67 要求「至少包含」若干类内容，因此工作表在 V1 §108 �
 | 20 | 方案比较 | 各候选方案的容量、投资、IRR/NPV/回收期/LCOE/LCOS、年节省、自用率、自给率、等效循环 | `result.scenario_results` | 「未执行方案比较」说明 |
 | 21 | 方案寻优 | 目标、扫描维度、约束、最优方案与**「为什么最优」**、候选明细（§45–§48） | `result.optimization_results` | 「未执行方案寻优」说明 |
 | 22 | 数据质量 | 总分与四个分项、等级、问题清单（§55） | `result.data_quality` | 「不适用」说明（未导入外部数据） |
+| 23 | **账单原始数据**（V2.1 §8.1） | 账单事实逐条明细（账期、计量点、电量、费用分项、来源、质量状态），**按账期排序** | `Project.bills` | 「本项目尚未录入电费账单」+ 录入方法 |
+| 24 | **账单校验**（V2.1 §8.1） | ΔE（分时电量合计差）、ΔC（费用分项合计差）、电度电费二层核对、三态一致性、问题清单、**`assumptions` 口径假设** | `BillService.reconcile_all()`（已算好的核对结果） | 同上 |
+
+### 2.17 V2.1 新增的两张账单表（§8.1；阶段 2）
+
+**`账单原始数据`**（列名取自 `BILL_FIELD_LABELS`，含单位）
+
+| 列 | 数据来源 | 规则 |
+|---|---|---|
+| 序号 / 账单编号 / 账单月份 / 账期起 / 账期止 / 跨月账期 | `ElectricityBill` | 按 `billing_period_start → billing_period_end → 计量点` 排序 |
+| 计量点编号 / 客户名称 / 电压等级 / 计费方式 / 合同容量 / 账单计费需量 | `ElectricityBill` | 空值写「账单未提供」；`billing_demand_kw` 是**账单事实**，不是曲线最大值 |
+| 总购电量 + 五个分时时段电量 | `ElectricityBill` | `None` → **「账单未提供」（绝不写 0）** |
+| 13 个费用分项 + 账单总额 | `ElectricityBill` | 同上；`power_factor_adjustment_yuan` / `adjustment_charge_yuan` 允许负值 |
+| 数据来源 / 来源文件名 / 来源行号 / 备注 | `ElectricityBill` | 来源中文标签：手动录入 / Excel 导入 / 估算 |
+| 数据质量状态 / 数据质量说明 | `ElectricityBill` | 中文说明逐条拼接 |
+
+**`账单校验`**
+
+| 区块 | 内容 | 数据来源 |
+|---|---|---|
+| 汇总 | 核对条数、有效/警告/无效条数、ΔE 与 ΔC 的口径说明 | `BillService.reconcile_all()` + `ElectricityBill.quality_status` |
+| 明细 | ΔE、电量容差、电量是否一致（三态）、未提供时段、ΔC、金额容差、金额是否一致、电度电费二层差、二层是否一致、质量状态、问题清单（含 ERROR/WARNING/INFO 与规则编号） | `BillReconciliation` |
+| 口径假设 | `assumptions` 逐条披露（含"平均综合电价只是统计口径"、"未提供的分项不按 0 计入"） | `BillReconciliation.assumptions` |
+
+**无账单时**：两张表照常生成，写「本项目尚未录入电费账单」＋三种录入方法（手动录入 /
+模板导入 / 直接导入 Excel·CSV）＋「账单事实与模拟结果分开保存」的说明，
+**不缺表、不报错**（V2.1 §8.2）；由 `tests/test_bill_ui_report.py::TestExcelBillSheets` 断言。
 
 **「8760时序仿真」表的抽样规则（重要）**
 
@@ -436,56 +471,70 @@ V2 §67 要求「至少包含」若干类内容，因此工作表在 V1 §108 �
 | 项目 | 规格 |
 |---|---|
 | 文件扩展名 | `.xlsx`（非 `.xlsx` 时自动补后缀） |
-| 工作表数量 | **固定 24 张**（V2 起；V1 的 13 张全部保留且相对顺序不变，第一张默认空表已被移除） |
+| 工作表数量 | **固定 26 张**（V2.1 阶段 2 起；V1 的 13 张全部保留且相对顺序不变，第一张默认空表已被移除） |
 | 标题行 | 第 1 行合并单元格，加粗 14 号；数据从第 3 行开始 |
 | 表头行 | 加粗 + 浅蓝填充 `DDEBF7` + 细边框 + 居中换行 |
 | 冻结窗格 | 「年度现金流」冻结在首列之后；「敏感性分析」冻结首列 |
 | 列宽 | 自适应，最小 10、最大 42（来源表 48、政策表 60、现金流表 20） |
 | 数字格式 | 金额 `#,##0.00`；整数 `#,##0`；比例 `0.00%`；四位小数 `#,##0.0000` |
 | 无值文案 | "无法计算" / "未回收" / "不适用" / "未覆盖" / "未标注" |
-| 日志 | 导出后写日志："导出 Excel：`<path>`（24 张工作表）" |
+| 日志 | 导出后写日志："导出 Excel：`<path>`（26 张工作表）" |
 
 ---
 
 ## 3. PDF 报告设计（§110、§111）
 
 > **当前状态：已实现（快照进行中）。** 实现文件为 `src/cenep/reports/pdf_exporter.py`
-> （`PdfExporter.export(project, result, path)`，reportlab，16 部分 + 3 张图表；中文字体优先系统 TTF，
+> （`PdfExporter.export(project, result, path)`，reportlab，17 部分 + 3 张图表；中文字体优先系统 TTF，
 > 回退 `STSong-Light`，再回退 Helvetica）。数据来源同样只能是 `CalculationResult` 与 `Project`。
 
-### 3.1 16 部分结构（V2 §66）
+### 3.1 17 部分结构（V2 §66 + V2.1 §8.1）
 
 V2 §66 把 V1 §110 的 15 章**重组为 16 部分**：V1 的「测算条件 / 技术参数 / 电价参数」
-并入「二、输入参数」，「运营成本」并入「十、现金流」，「收益测算」并入「十一、经济指标」，
-「政策依据」并入「十五、参数来源」；并**新增 6 个时序章节**。V1 的内容一项未丢。
+并入「二、输入参数」，「运营成本」并入「十一、现金流」，「收益测算」并入「十二、经济指标」，
+「政策依据」并入「十六、参数来源」；并**新增 6 个时序章节**。
+**V2.1 §8.1（阶段 2）在「二、输入参数」之后插入「三、账单事实与校验」**，
+此后各章编号整体顺延一位（内容与名目一项未丢），共 **17 部分**。V1 的内容一项未丢。
 
 | # | 部分名 | 主要内容 | 数据来源 | V1 对应 |
 |---|---|---|---|---|
 | — | 封面 | 项目名称、类型、地点、业主、评价日期、政策版本、免责提示 | `Project.basic_info`、`Project.policy` | 原第 1 章 |
 | 一 | 项目概况 | 项目身份表 + 关键结论指标摘要 | `Project.basic_info`、`CalculationResult` | 原第 2 章 |
 | 二 | 输入参数 | （一）技术参数　（二）电价参数，以及计算期、折现率、口径说明 | `Project`、`result.notes` | 原第 3–5 章 |
-| 三 | 负荷分析 | 年电量、最大/最小/平均负荷、取得方式、增长率；**图 1** 典型日负荷与光伏出力 | `time_series_results.hourly` | **新增** |
-| 四 | PV时序分析 | 年发电量、等效小时、最大出力、弃光、自用率、自给率；**图 2** 逐月上网电量 | 同上 | **新增** |
-| 五 | 储能SOC分析 | 容量/功率、SOC 上下限与实际区间、充放电量、电网充电量、等效循环；**图 3** 典型日 SOC | `time_series_results.hourly`、`metrics` | **新增** |
-| 六 | 能源流 | 供给侧/需求侧全部路径分项、平衡误差、容差、是否平衡（§19） | `result.energy_balance` | **新增** |
-| 七 | 电费分析 | 基准/实际电费、电费节省及其分解、需量电费节省、最大需量前后 | `metrics`、`baseline_results` | **新增** |
-| 八 | 储能收益 | 套利/容量/辅助/其他收益、等效循环、上网收入、首年收益合计 | `metrics` | **新增** |
-| 九 | 投资 | 投资明细、总投资、单位投资 | `result.capex_breakdown`、`unit_investment` | 原第 6 章 |
-| 十 | 现金流 | （一）运营成本　（二）年度现金流表（含 Year 0） | `Project.opex`、`annual_results` | 原第 7、9 章 |
-| 十一 | 经济指标 | （一）收益测算　（二）11 个首页指标 + ROI + 资本金 NPV | `AnnualResult`、`CalculationResult` | 原第 8、10 章 |
-| 十二 | 方案比较 | 三情景对比表；有 V2 方案扫描结果时并列表 | `result.scenarios`、`scenario_results` | 原第 12 章 + V2 |
-| 十三 | 敏感性 | 敏感性表（IRR/NPV/回收期） | `result.sensitivity` | 原第 11 章 |
-| 十四 | 风险 | 敏感性最高的因素、假设值、政策时效性提示（**不含"可行/不可行"结论**） | `result.sensitivity`、`parameter_sources` | 原第 13 章 |
-| 十五 | 参数来源 | （一）测算说明：政策版本、参数来源与链接、核实状态、全部口径说明 | `Project.policy`、`result.notes` | 原第 14、15 章 |
-| 十六 | 免责声明 | 免责声明全文（两段，原文照抄） | §111 原文 | 原第 15 章末 |
+| **三** | **账单事实与校验** | **账单概况、月度趋势、账单事实明细、ΔE/ΔC 校验、口径假设；无账单时输出说明段落** | **`Project.bills`、`BillService`** | **V2.1 新增（§8.1）** |
+| 四 | 负荷分析 | 年电量、最大/最小/平均负荷、取得方式、增长率；**图 1** 典型日负荷与光伏出力 | `time_series_results.hourly` | **新增** |
+| 五 | PV时序分析 | 年发电量、等效小时、最大出力、弃光、自用率、自给率；**图 2** 逐月上网电量 | 同上 | **新增** |
+| 六 | 储能SOC分析 | 容量/功率、SOC 上下限与实际区间、充放电量、电网充电量、等效循环；**图 3** 典型日 SOC | `time_series_results.hourly`、`metrics` | **新增** |
+| 七 | 能源流 | 供给侧/需求侧全部路径分项、平衡误差、容差、是否平衡（§19） | `result.energy_balance` | **新增** |
+| 八 | 电费分析 | 基准/实际电费、电费节省及其分解、需量电费节省、最大需量前后 | `metrics`、`baseline_results` | **新增** |
+| 九 | 储能收益 | 套利/容量/辅助/其他收益、等效循环、上网收入、首年收益合计 | `metrics` | **新增** |
+| 十 | 投资 | 投资明细、总投资、单位投资 | `result.capex_breakdown`、`unit_investment` | 原第 6 章 |
+| 十一 | 现金流 | （一）运营成本　（二）年度现金流表（含 Year 0） | `Project.opex`、`annual_results` | 原第 7、9 章 |
+| 十二 | 经济指标 | （一）收益测算　（二）11 个首页指标 + ROI + 资本金 NPV | `AnnualResult`、`CalculationResult` | 原第 8、10 章 |
+| 十三 | 方案比较 | 三情景对比表；有 V2 方案扫描结果时并列表 | `result.scenarios`、`scenario_results` | 原第 12 章 + V2 |
+| 十四 | 敏感性 | 敏感性表（IRR/NPV/回收期） | `result.sensitivity` | 原第 11 章 |
+| 十五 | 风险 | 敏感性最高的因素、假设值、政策时效性提示（**不含"可行/不可行"结论**） | `result.sensitivity`、`parameter_sources` | 原第 13 章 |
+| 十六 | 参数来源 | （一）测算说明：政策版本、参数来源与链接、核实状态、全部口径说明 | `Project.policy`、`result.notes` | 原第 14、15 章 |
+| 十七 | 免责声明 | 免责声明全文（两段，原文照抄） | §111 原文 | 原第 15 章末 |
+
+**V2.1 §8.1「三、账单事实与校验」的内容与口径**
+
+| 小节 | 内容 | 数据来源 | 关键约束 |
+|---|---|---|---|
+| 概况 | 账单条数、覆盖月份、数据来源构成、质量状态构成、年度覆盖率 / 总电量 / 总额 / 平均综合电价、是否可直接相加、缺失月份、跨月与非自然月账期 | `Project.bills`、`BillService.annual_summary()` | 平均综合电价**只是账单统计口径**，不得当作边际节省电价（§3.1） |
+| （一）月度趋势 | 逐月条数、总购电量、账单总额、平均综合电价、跨月标记、质量状态 | `BillService.monthly_summary()` | `None` → 「账单未提供」，**不显示 0**（§2.1） |
+| （二）账单事实明细 | 逐条账单的月份、账期（跨月标注）、计量点、总购电量、账单总额、数据来源、质量状态 | `Project.bills` | 按账期排序；数据来源标签（手动录入 / Excel 导入 / 估算）必须显示 |
+| （三）校验与差异 | ΔE、电量一致性三态、ΔC、金额一致性三态、电度电费二层核对、质量状态、问题清单（ERROR / WARNING / INFO + 规则编号） | `BillService.reconcile_all()` | 差异数值一律披露，不因未超容差而隐藏（§2.1） |
+| （四）口径假设 | `assumptions` 与年度汇总 `messages` 逐条列出 + 「账单事实 vs 模拟结果」分界说明 | `BillReconciliation.assumptions`、`BillAnnualSummary.messages` | 必须写明账单复算与光储方案模拟属于阶段 5/6，当前为「待确认 / 未建模」 |
+| 无账单时 | 「本项目尚未录入电费账单」＋三种录入方法＋分界说明 | 固定中文文案 | **不缺章节、不报错**（§8.2） |
 
 **新增图表（V2 §66，用 `reportlab.graphics` 直接绘制，不引入新依赖）**
 
 | 图 | 位置 | 内容 | 数据来源 |
 |---|---|---|---|
-| 图 1 | 三、负荷分析 | 典型日（7 月 15 日）负荷与光伏出力双折线 | `hourly.load`、`hourly.pv_generation` |
-| 图 2 | 四、PV时序分析 | 逐月上网电量柱状图（12 柱） | `hourly.grid_export` 按月汇总 |
-| 图 3 | 五、储能SOC分析 | 典型日（7 月 15 日）储能 SOC 曲线（%） | `hourly.storage_soc_end` |
+| 图 1 | 四、负荷分析 | 典型日（7 月 15 日）负荷与光伏出力双折线 | `hourly.load`、`hourly.pv_generation` |
+| 图 2 | 五、PV时序分析 | 逐月上网电量柱状图（12 柱） | `hourly.grid_export` 按月汇总 |
+| 图 3 | 六、储能SOC分析 | 典型日（7 月 15 日）储能 SOC 曲线（%） | `hourly.storage_soc_end` |
 
 **绘图约束**：只画**抽样**数据（典型日 24 点或 12 个月），不把 8760 点画进报告，
 以免 PDF 体积与渲染时间失控；未启用时序仿真时**不绘制任何图表**（V1 报告保持无图）。
@@ -679,7 +728,7 @@ V2 §66 把 V1 §110 的 15 章**重组为 16 部分**：V1 的「测算条件 /
 | 位置 | 形式 |
 |---|---|
 | 封面底部 | 一句话提示："本报告为前期测算材料，不替代正式可行性研究。" |
-| 第十六部分「免责声明」 | **免责声明全文（两段，原文照抄）** |
+| 第十七部分「免责声明」 | **免责声明全文（两段，原文照抄）** |
 | 每页页脚（左） | 一句话提示 |
 | PDF 元数据 / 尾页 | 完整免责声明再次出现（可选） |
 
@@ -693,12 +742,12 @@ PDFExporter.export(project, result, path)
       │
       ├─ 构建文档（A4、页眉页脚模板）
       ├─ 第 1 章 封面
-      ├─ 第 1–16 部分 逐章渲染
+      ├─ 第 1–17 部分 逐章渲染
       │      └─ 所有数值直接取自 CalculationResult / Project（禁止重算）
       ├─ 图表：matplotlib 生成图片后插入（数据来自 result 序列）
       ├─ 免责声明原文校验（断言两段文本均存在）
       ├─ 保存 PDF
-      └─ 日志："导出 PDF：<path>（16 部分）"
+      └─ 日志："导出 PDF：<path>（17 部分）"
 ```
 
 ---
@@ -718,24 +767,27 @@ PDFExporter.export(project, result, path)
 
 ### 4.2 报告验收 checklist
 
-- [x] Excel 恰好 24 张工作表（V1 §108 的 13 张 + V2 §67 新增 11 张），表名与 `SHEET_NAMES` 一致 —— ✅已实现
+- [x] Excel 恰好 26 张工作表（V1 §108 的 13 张 + V2 §67 新增 11 张 + V2.1 §8.1 新增 2 张账单表），表名与 `SHEET_NAMES` 一致 —— ✅已实现
 - [x] Excel 数据全部来自 `CalculationResult` / `Project` —— ✅已实现
 - [x] 年度现金流表包含 Year 0 行 —— ✅已实现
 - [x] 参数来源表按 `SourceType` 着色，假设值带"假设值；"前缀 —— ✅已实现
 - [x] 未关联政策时的提示文案 —— ✅已实现
 - [x] Excel 全部测试通过（**V2.0.0 全量 885 passed / 0 failed**） —— ✅已完成
 - [ ] 年度现金流表补齐建议列（电量分配、收入构成、利润表、债务、偿债） —— ⬜未实现
-- [x] PDF 16 部分齐备且部分名与 V2 §66 一致 —— ✅已实现
+- [x] PDF 17 部分齐备且部分名与 V2 §66 / V2.1 §8.1 一致 —— ✅已实现
 - [x] PDF 封面要素完整（含政策版本与免责提示） —— ✅已实现（快照进行中）
 - [x] PDF 页眉页脚、页码、政策版本提示位 —— ✅已实现（快照进行中）
-- [x] PDF 第十六部分含 §111 免责声明原文（两段） —— ✅已实现
+- [x] PDF 第十七部分含 §111 免责声明原文（两段） —— ✅已实现
+- [x] V2.1 §8.1 两张账单表（`账单原始数据` / `账单校验`）在**有 / 无账单**两种情况下均生成，无账单时写明三种录入方法 —— ✅已实现（`tests/test_bill_ui_report.py::TestExcelBillSheets`）
+- [x] V2.1 §8.1 PDF「三、账单事实与校验」章节（概况 / 月度趋势 / 事实明细 / ΔEΔC / assumptions / 无账单说明） —— ✅已实现（`tests/test_bill_ui_report.py::TestPdfBillSection`）
+- [x] 账单电量 / 金额为 `None` 时 Excel 与 PDF 均写「账单未提供」，**绝不写 0**（V2.1 §2.1） —— ✅已实现（`TestMissingValueDisplay::test_excel_and_pdf_never_show_zero_for_missing`）
 - [ ] PDF 图表齐全（**规范原列的三张：累计现金流、IRR 敏感性、NPV 敏感性**） —— ⬜**仍未实现**；V2 新增的 3 张图是**典型日负荷与光伏出力曲线、逐月上网电量柱状图、典型日储能 SOC 曲线**，与这三张不是同一组
 - [x] PDF ↔ `CalculationResult` 一致性测试（`tests/test_pdf_export.py`、`tests/test_report_v2.py`） —— ✅已实现且测试全绿
 - [~] 三层互等测试（GUI = Excel = PDF） —— ⚠️ **间接覆盖**（GUI↔结果 与 Excel/PDF↔结果 分别有断言），**尚无单一的三层互等用例**
 
 ---
 
-## 5. 免责声明（§111，原文，必须完整出现在 PDF 第十六部分）
+## 5. 免责声明（§111，原文，必须完整出现在 PDF 第十七部分）
 
 > **本软件用于新能源项目开发阶段的前期经济测算和投资决策辅助，不替代项目正式可行性研究、工程设计、工程造价咨询、审计、税务咨询、金融机构审查及政府审批文件。**
 >
@@ -748,7 +800,7 @@ PDFExporter.export(project, result, path)
 **Phase 6（Excel，已基本完成）**
 
 - [x] 建立 `src/cenep/reports/excel_exporter.py`
-- [x] 实现 24 张工作表（V1 13 张 + V2 新增 11 张）
+- [x] 实现 26 张工作表（V1 13 张 + V2 新增 11 张 + V2.1 新增 2 张账单表）
 - [x] 实现来源类型着色与假设值前缀
 - [x] 实现标题/表头/边框/列宽/数字格式
 - [ ] 修复 `tests/test_excel_export.py` 中的失败项
@@ -760,7 +812,7 @@ PDFExporter.export(project, result, path)
 **Phase 7（PDF，已实现，快照进行中）**
 
 - [x] 建立 `src/cenep/reports/pdf_exporter.py`（reportlab）
-- [x] 实现封面与 16 部分结构（`REPORT_SECTIONS`）
+- [x] 实现封面与 17 部分结构（`REPORT_SECTIONS`）
 - [x] 实现页眉页脚模板、页码、政策版本提示位（`_decorate`）
 - [x] 实现中文字体注册（系统 TTF → `STSong-Light` → Helvetica 回退）
 - [x] 实现表格渲染组件（表头样式、数字格式、无值文案）
@@ -784,4 +836,4 @@ PDFExporter.export(project, result, path)
 | `HUBEI_POLICY_MODEL.md` | 政策版本展示文案与字段来源 |
 | `src/cenep/domain/results.py` | 本文件所有数据来源字段的权威定义 |
 | `src/cenep/reports/excel_exporter.py` | Excel 的现有实现 |
-| `src/cenep/reports/pdf_exporter.py` | PDF 实现（16 部分 + 3 张图表 + 块级重排由 V2 §66 决定） |
+| `src/cenep/reports/pdf_exporter.py` | PDF 实现（17 部分 + 3 张图表 + 块级重排由 V2 §66 / V2.1 §8.1 决定） |

@@ -27,8 +27,9 @@ class TestSelfTest:
             "PV_STORAGE",
         }
         for item in data["projects"]:
-            # V2 §67 起工作表由 13 张扩展为 24 张（V1 的 13 张全部保留）
-            assert item["excel_sheets"] == 24
+            # V2 §67 起工作表由 13 张扩展为 24 张（V1 的 13 张全部保留）；
+            # V2.1 §8.1（阶段 2）再新增「账单原始数据」「账单校验」两张，共 26 张。
+            assert item["excel_sheets"] == 26
             assert item["pdf_bytes"] > 5000
 
     def test_selftest_values_match_engine(self, tmp_path: Path):

@@ -41,16 +41,23 @@ class TestWorkbookStructure:
         assert path.exists()
 
     def test_sheets_match_names_and_count(self, exported):
-        """V2 §67：工作表清单为 V1 §108 的 13 张 + V2 新增 11 张时序表 = 24 张。
+        """V2 §67 + V2.1 §8.1：V1 §108 的 13 张 + V2 新增 11 张时序表 + V2.1 新增 2 张账单表 = 26 张。
 
-        这是 V2 §67「至少包含」对 V1 §108 的**正当超集扩展**：
-        V1 的 13 张全部保留且相对顺序不变，新增表在无时序数据时输出占位说明，
-        因此 V1 项目仍可正常导出（见 test_v1_project_still_exports）。
+        这是 V2 §67「至少包含」与 V2.1 §8.1 对 V1 §108 的**正当超集扩展**：
+        V1 的 13 张全部保留且相对顺序不变，新增表在无对应数据时输出中文说明，
+        因此 V1 项目与无账单项目仍可正常导出（见 test_v1_project_still_exports）。
         """
         _, _, path = exported
         wb = load_workbook(path)
         assert wb.sheetnames == SHEET_NAMES
-        assert len(wb.sheetnames) == 24
+        assert len(wb.sheetnames) == 26
+
+    def test_v21_bill_sheets_included(self, exported):
+        """V2.1 §8.1：两张账单表必须存在于工作簿中（无账单时也照常生成）。"""
+        _, _, path = exported
+        names = set(load_workbook(path).sheetnames)
+        for required in ("账单原始数据", "账单校验"):
+            assert required in names, f"缺少 V2.1 §8.1 要求的表：{required}"
 
     def test_v2_sheets_included(self, exported):
         """V2 §67 要求的新增表必须存在。"""

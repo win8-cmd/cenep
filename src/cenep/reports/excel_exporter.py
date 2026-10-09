@@ -1,15 +1,19 @@
-"""Excel 导出（规范 §108、§109、§148、§154）。
+"""Excel 导出（规范 §108、§109、§148、§154；V2.1 §8.1）。
 
 铁律
 ----
-**数据全部来自 :class:`CalculationResult`，本模块不做任何计算。**
+**数据全部来自 :class:`CalculationResult`、:class:`Project` 的账单段与账单服务
+（``BillService``，只取它已经算好的核对结果），本模块不做任何计算。**
 可以在表内展示公式文本，但数值必须与软件计算结果一致（规范 §109）。
 
-输出为 13 张工作表（规范 §108）：
+V1 的 13 张工作表（规范 §108）：
 
 1. 项目概况  2. 基础参数  3. 技术参数  4. 电价参数  5. 投资参数  6. 运维参数
 7. 融资参数  8. 年度现金流  9. 财务指标  10. 敏感性分析  11. 情景分析
 12. 政策依据  13. 参数来源
+
+V2 起为 **26 张**：V1 的 13 张全部保留且相对顺序不变，V2 §67 新增 11 张时序表，
+V2.1 §8.1 再新增「账单原始数据」「账单校验」两张。
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from ..application.bill_service import BillService
+from ..domain.bill_models import BILL_FIELD_LABELS, label_of
 from ..domain.models import Project
 from ..domain.results import CalculationResult
 from ..infrastructure.logging_setup import get_logger
@@ -31,9 +37,11 @@ logger = get_logger()
 #:
 #: V1 的 13 张（§108）**全部保留且相对顺序不变**；V2 按 §67「至少包含」新增 11 张时序相关表
 #: （储能与调度、负荷曲线、光伏曲线、分时电价、8760时序仿真、能量平衡、年度汇总、
-#: 收益分解、方案比较、方案寻优、数据质量），共 **24 张**。
-#: 这是 V2 §67 对 V1 §108 的**正当超集扩展**，不是破坏性变更：
-#: 新表在无时序数据时输出"本项目未启用时序仿真"说明，V1 项目仍可正常导出。
+#: 收益分解、方案比较、方案寻优、数据质量）；V2.1 §8.1 再新增 2 张账单表
+#: （账单原始数据、账单校验），共 **26 张**。
+#: 这是 V2/V2.1 对 V1 §108 的**正当超集扩展**，不是破坏性变更：
+#: 新表在无对应数据时输出中文说明（«本项目未启用时序仿真» / «本项目尚未录入电费账单»），
+#: V1 项目与无账单项目仍可正常导出。
 SHEET_NAMES = [
     # —— V1 原有（映射 V2 §67 的 Overview / Project / Base Parameters / Storage ——）
     "项目概况",
@@ -65,6 +73,9 @@ SHEET_NAMES = [
     "方案比较",
     "方案寻优",
     "数据质量",
+    # —— V2.1 新增（§8.1）——
+    "账单原始数据",
+    "账单校验",
     # —— V1 原有 ——
     "政策依据",
     "参数来源",
@@ -1116,6 +1127,263 @@ def _sheet_data_quality(wb: Workbook, project: Project, result: CalculationResul
 
 
 # --------------------------------------------------------------------------- #
+# V2.1 账单工作表（规格书 §8.1；阶段 2）
+#
+# 设计要点（与既有报表一致，§109 / §61 / V2.1 §2.1）：
+# * 全部写已经算好 / 解析好的值，**工作簿内公式数必须为 0**（既有测试会断言）；
+# * 电量 / 金额为 ``None`` 时写文本「账单未提供」，**绝不写 0**（V2.1 §2.1）；
+# * 无账单时两张表**照常生成**，写「本项目尚未录入电费账单」与录入方法，不缺表、不报错
+#   （V2.1 §8.2：旧项目打开后显示空状态，不自动生成虚构数据）；
+# * 「账单校验」的差异明细取自应用服务 ``BillService.reconcile_all()``，
+#   报表层**不做任何算术**（V2.1 §0.2：公式唯一实现在 calculation/）。
+# --------------------------------------------------------------------------- #
+#: 账单字段「未提供」的统一文案（与界面 ``ui/pages.py`` 保持一致，V2.1 §2.1）
+BILL_NOT_PROVIDED_TEXT = "账单未提供"
+
+#: 无账单时的说明（§8.2：不得缺表、不得报错）
+BILL_EMPTY_TEXT = "本项目尚未录入电费账单。"
+BILL_EMPTY_HOWTO = (
+    "录入方法：① 在「月度账单」页手动录入（账期、电量与费用分项）；"
+    "② 在「月度账单」页点击「下载导入模板」，按《CENEP_电费账单导入模板.xlsx》填写后"
+    "经「导入向导」六步（选文件 → 选表 → 映射列 → 预览 → 校验 → 确认）导入；"
+    "③ 也可直接导入已有 Excel / CSV 账单表。"
+)
+BILL_EMPTY_NOTE = (
+    "说明：账单事实（本表）与账单模拟 / 复算结果分开保存；"
+    "账单复算与光储方案模拟属于阶段 5 / 6，当前为『待确认 / 未建模』（V2.1 §1、§8.1）。"
+)
+
+#: 「账单原始数据」表的列（字段名 → 取 :data:`BILL_FIELD_LABELS` 的中文列名，含单位）
+_BILL_RAW_FIELDS: tuple[str, ...] = (
+    "billing_month",
+    "billing_period_start",
+    "billing_period_end",
+    "meter_id",
+    "customer_name",
+    "voltage_level",
+    "tariff_structure",
+    "contract_capacity_kva",
+    "billing_demand_kw",
+    "energy_total_kwh",
+    "energy_sharp_kwh",
+    "energy_peak_kwh",
+    "energy_flat_kwh",
+    "energy_valley_kwh",
+    "energy_offpeak_kwh",
+    "market_purchase_charge_yuan",
+    "transmission_distribution_charge_yuan",
+    "line_loss_charge_yuan",
+    "system_operation_charge_yuan",
+    "government_fund_charge_yuan",
+    "energy_charge_yuan",
+    "basic_capacity_charge_yuan",
+    "demand_charge_yuan",
+    "power_factor_adjustment_yuan",
+    "other_charge_yuan",
+    "vat_yuan",
+    "adjustment_charge_yuan",
+    "bill_total_yuan",
+    "source_type",
+    "source_file_name",
+    "source_row_number",
+    "notes",
+    "quality_status",
+)
+
+#: 需要写成「账单未提供」而不是 0 的数值字段（电量 + 全部金额，V2.1 §2.1）
+_BILL_NUMERIC_FIELDS = frozenset(
+    field for field in _BILL_RAW_FIELDS if field.endswith("_kwh") or field.endswith("_yuan")
+)
+
+
+def _bill_cell(bill, field: str):
+    """把一个账单字段转成可写入单元格的值（``None`` → 「账单未提供」，不写 0）。"""
+    value = getattr(bill, field, None)
+    if field in _BILL_NUMERIC_FIELDS:
+        return BILL_NOT_PROVIDED_TEXT if value is None else value
+    if field in ("billing_period_start", "billing_period_end"):
+        return value.isoformat() if value is not None else BILL_NOT_PROVIDED_TEXT
+    if field == "source_type":
+        return bill.source_type.label
+    if field == "quality_status":
+        return bill.quality_status.label
+    if field == "tariff_structure":
+        return bill.tariff_structure.label
+    if value is None or not str(value).strip():
+        return BILL_NOT_PROVIDED_TEXT
+    return value
+
+
+def _bill_sort_key(bill):
+    """按账期排序（起始日 → 结束日 → 计量点），保证导出顺序稳定可复核。"""
+    return (bill.billing_period_start, bill.billing_period_end, bill.meter_id or "")
+
+
+def _write_bill_empty_note(ws, row: int) -> int:
+    """无账单时的说明块（§8.2：两张表照常生成、写清录入方法）。"""
+    ws.cell(row=row, column=1, value=BILL_EMPTY_TEXT).font = _BOLD
+    row += 1
+    for text in (BILL_EMPTY_HOWTO, BILL_EMPTY_NOTE):
+        ws.cell(row=row, column=1, value=text)
+        row += 1
+    return row
+
+
+def _sheet_bill_raw(wb: Workbook, project: Project, result: CalculationResult) -> None:
+    """账单原始数据（V2.1 §2.1、§8.1）：账单事实逐条明细，按账期排序。"""
+    ws = wb.create_sheet("账单原始数据")
+    headers = ["序号", "账单编号", *[BILL_FIELD_LABELS[f] for f in _BILL_RAW_FIELDS], "跨月账期", "数据质量说明"]
+    row = _write_title(ws, "账单原始数据（账单事实，按账期排序；V2.1 §2.1）", len(headers))
+    bills = sorted(project.bills, key=_bill_sort_key)
+    if not bills:
+        _write_bill_empty_note(ws, row)
+        _auto_width(ws, max_width=60)
+        return
+
+    row = _write_header_at(ws, row, headers)
+    data = []
+    for index, bill in enumerate(bills, start=1):
+        data.append(
+            [
+                index,
+                bill.bill_id,
+                *[_bill_cell(bill, field) for field in _BILL_RAW_FIELDS],
+                "是" if bill.is_cross_month else "否",
+                "；".join(bill.quality_messages) if bill.quality_messages else "无",
+            ]
+        )
+    formats = {
+        column: _NUM4
+        for column, field in enumerate(["", "", *_BILL_RAW_FIELDS], start=1)
+        if field in _BILL_NUMERIC_FIELDS
+    }
+    end = _write_rows(ws, row, data, formats=formats)
+    row = end + 1
+    ws.cell(row=row, column=1, value=BILL_EMPTY_NOTE)
+    row += 1
+    ws.cell(
+        row,
+        column=1,
+        value=(
+            f"共 {len(bills)} 条账单；电量为 None 的分项在表中写「{BILL_NOT_PROVIDED_TEXT}」，"
+            "不按 0 计入任何合计（V2.1 §2.1）。"
+        ),
+    )
+    _auto_width(ws, max_width=48)
+
+
+def _sheet_bill_check(wb: Workbook, project: Project, result: CalculationResult) -> None:
+    """账单校验（V2.1 §3.1、§5.5、§8.1）：差异明细与口径假设。"""
+    ws = wb.create_sheet("账单校验")
+    row = _write_title(ws, "账单校验（差异与口径假设；V2.1 §3.1、§5.5）", 4)
+    bills = sorted(project.bills, key=_bill_sort_key)
+    if not bills:
+        _write_bill_empty_note(ws, row)
+        _auto_width(ws, max_width=60)
+        return
+
+    # 校验明细取自账单服务（内部委托 calculation/bill_calculator），报表层不做算术
+    outcomes = BillService(project).reconcile_all()
+    by_id = {item.bill_id: item for item in outcomes}
+    invalid = sum(1 for bill in bills if bill.quality_status.value == "invalid")
+    warning = sum(1 for bill in bills if bill.quality_status.value == "warning")
+    valid = len(bills) - invalid - warning
+
+    row = _write_rows(
+        ws,
+        row,
+        [
+            ["核对账单条数", len(bills), "", "按账期排序"],
+            ["有效 / 有警告 / 无效", f"{valid} / {warning} / {invalid}", "", "无效账单不得视为可用事实"],
+            ["分时电量合计差 ΔE", "见下表", "", "ΔE = 总电量 − Σ分时电量（§3.1）"],
+            ["费用分项合计差 ΔC", "见下表", "", "ΔC = 账单总额 − Σ一层费用分项（§3.1）"],
+        ],
+    )
+    row += 1
+
+    row = _write_header_at(
+        ws,
+        row,
+        [
+            "账单编号",
+            "账单月份",
+            "分时电量合计差 ΔE（kWh）",
+            "电量容差（kWh）",
+            "电量是否一致",
+            "未提供时段",
+            "费用分项合计差 ΔC（元）",
+            "金额容差（元）",
+            "金额是否一致",
+            "电度电费二层差（元）",
+            "二层是否一致",
+            "质量状态",
+            "问题清单",
+        ],
+    )
+    data = []
+    for bill in bills:
+        item = by_id.get(bill.bill_id)
+        if item is None:  # pragma: no cover - reconcile_all 与账单列表同源，不会缺
+            continue
+        issues = "；".join(
+            f"{issue.level}[{issue.code or '—'}]{label_of(issue.field) if issue.field else ''}：{issue.message}"
+            for issue in item.issues
+        )
+        data.append(
+            [
+                bill.bill_id,
+                bill.billing_month,
+                _fmt(item.energy_difference_kwh, 4) if item.energy_difference_kwh is not None else BILL_NOT_PROVIDED_TEXT,
+                item.energy_tolerance_kwh,
+                _tristate(item.energy_consistent),
+                "、".join(label_of(f) for f in item.energy_missing_periods)
+                if item.energy_missing_periods
+                else "无",
+                _fmt(item.amount_difference_yuan, 4)
+                if item.amount_difference_yuan is not None
+                else BILL_NOT_PROVIDED_TEXT,
+                item.amount_tolerance_yuan,
+                _tristate(item.amount_consistent),
+                _fmt(item.energy_sub_difference_yuan, 4)
+                if item.energy_sub_difference_yuan is not None
+                else BILL_NOT_PROVIDED_TEXT,
+                _tristate(item.energy_sub_consistent),
+                item.quality_status.label,
+                issues or "未发现问题",
+            ]
+        )
+    row = _write_rows(ws, row, data, formats={3: _NUM4, 4: _NUM4, 7: _NUM4, 8: _NUM4, 10: _NUM4})
+    row += 1
+
+    row = _write_header_at(ws, row, ["口径与假设（assumptions，逐条披露，§3.1）", "适用账单", "", ""])
+    assumptions = []
+    seen: set[str] = set()
+    for bill in bills:
+        item = by_id.get(bill.bill_id)
+        if item is None:  # pragma: no cover
+            continue
+        for text in item.assumptions:
+            if text not in seen:
+                seen.add(text)
+                assumptions.append([text, bill.bill_id, "", ""])
+    for text in (BILL_EMPTY_NOTE, BILL_NOT_PROVIDED_TEXT + " 的分项不参与合计，也不会被填成 0。"):
+        if text not in seen:
+            seen.add(text)
+            assumptions.append([text, "全部账单", "", ""])
+    _write_rows(ws, row, assumptions)
+    if not assumptions:  # pragma: no cover - 上面至少写入两条通用假设
+        ws.cell(row=row, column=1, value="无。")
+    _auto_width(ws, max_width=60)
+
+
+def _tristate(value: bool | None) -> str:
+    """三态显示：``True`` 一致 / ``False`` 超容差 / ``None`` 无法判断（缺数据，不按 0）。"""
+    if value is None:
+        return "无法判断（账单未提供相关字段）"
+    return "一致" if value else "超容差"
+
+
+# --------------------------------------------------------------------------- #
 # 对外接口
 # --------------------------------------------------------------------------- #
 class ExcelExporter:
@@ -1157,6 +1425,9 @@ class ExcelExporter:
         _sheet_scenario_compare(wb, project, result)
         _sheet_optimization(wb, project, result)
         _sheet_data_quality(wb, project, result)
+        # —— V2.1 §8.1：账单事实与校验（无账单时输出说明，不缺表）——
+        _sheet_bill_raw(wb, project, result)
+        _sheet_bill_check(wb, project, result)
         _sheet_policy(wb, project, result)
         _sheet_sources(wb, project, result)
 

@@ -1,9 +1,9 @@
-"""V2 报表升级测试（V2 §66、§67、§105、§108）。
+"""V2 报表升级测试（V2 §66、§67、§105、§108；V2.1 §8.1）。
 
 覆盖三件事：
 
-1. **Excel 表清单**（§67）：V1 的 13 张全部保留 + V2 新增 11 张 = 24 张，顺序固定；
-2. **PDF 章节**（§66）：16 部分，含 6 个时序章节与 3 张图表；
+1. **Excel 表清单**（§67 + V2.1 §8.1）：V1 的 13 张全部保留 + V2 新增 11 张 + V2.1 新增 2 张 = 26 张，顺序固定；
+2. **PDF 章节**（§66 + V2.1 §8.1）：17 部分，含 6 个时序章节、1 个账单章节与 3 张图表；
 3. **结果一致性**（§105）：Excel / PDF 展示的数字必须来自同一个 ``CalculationResult``，
    且两者都包含 V2 新增的关键指标。
 """
@@ -36,6 +36,8 @@ V2_SHEETS = (
     "储能与调度", "负荷曲线", "光伏曲线", "分时电价", "8760时序仿真",
     "能量平衡", "年度汇总", "收益分解", "方案比较", "方案寻优", "数据质量",
 )
+#: V2.1 §8.1（阶段 2）新增的两张账单表
+V21_SHEETS = ("账单原始数据", "账单校验")
 V1_SHEETS = (
     "项目概况", "基础参数", "技术参数", "电价参数", "投资参数", "运维参数",
     "融资参数", "年度现金流", "财务指标", "敏感性分析", "情景分析",
@@ -94,8 +96,9 @@ def _collect_text(flowables) -> str:
 # 任务 A：Excel（V2 §67）
 # --------------------------------------------------------------------------- #
 class TestExcelSheetSet:
-    def test_sheet_names_are_twenty_four(self):
-        assert len(SHEET_NAMES) == 24
+    def test_sheet_names_are_twenty_six(self):
+        """V2.1 §8.1：V2 的 24 张 + 账单两张 = 26 张。"""
+        assert len(SHEET_NAMES) == 26
 
     def test_v2_case_sheet_order(self, v2_case, tmp_path):
         project, result = v2_case
@@ -103,7 +106,7 @@ class TestExcelSheetSet:
         assert wb.sheetnames == SHEET_NAMES
 
     def test_v1_case_sheet_order(self, v1_case, tmp_path):
-        """V1 项目也必须有全部 24 张表（新增表输出占位说明）。"""
+        """V1 项目也必须有全部 26 张表（新增表输出占位说明）。"""
         project, result = v1_case
         wb = _export_excel(project, result, tmp_path / "v1.xlsx")
         assert wb.sheetnames == SHEET_NAMES
@@ -111,8 +114,18 @@ class TestExcelSheetSet:
     def test_all_required_sheets_present(self, v2_case, tmp_path):
         project, result = v2_case
         names = set(_export_excel(project, result, tmp_path / "v2.xlsx").sheetnames)
-        for name in (*V1_SHEETS, *V2_SHEETS):
+        for name in (*V1_SHEETS, *V2_SHEETS, *V21_SHEETS):
             assert name in names, f"缺少工作表：{name}"
+
+    @pytest.mark.parametrize("sheet", V21_SHEETS)
+    def test_no_bill_project_gets_placeholder_not_error(self, v1_case, tmp_path, sheet):
+        """V2.1 §8.1/§8.2：无账单时两张账单表照常生成，写明未录入与录入方法，不缺表不报错。"""
+        project, result = v1_case
+        wb = _export_excel(project, result, tmp_path / "v1.xlsx")
+        text = _sheet_text(wb[sheet])
+        assert text.strip(), f"{sheet} 内容为空"
+        assert "本项目尚未录入电费账单" in text
+        assert "导入" in text and "录入方法" in text
 
     @pytest.mark.parametrize(
         "sheet",
@@ -243,7 +256,8 @@ class TestPdfSections:
             PdfExporter().build_story(project, result, _styles(register_cjk_font()))
         )
         numbers = ("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、",
-                   "九、", "十、", "十一、", "十二、", "十三、", "十四、", "十五、", "十六、")
+                   "九、", "十、", "十一、", "十二、", "十三、", "十四、", "十五、", "十六、",
+                   "十七、")
         positions = []
         for prefix in numbers:
             idx = text.find(prefix)
@@ -277,7 +291,8 @@ class TestPdfCharts:
                 current = item.text
             elif isinstance(item, Drawing):
                 placed[current] = placed.get(current, 0) + 1
-        for section in ("三、负荷分析", "四、PV时序分析", "五、储能SOC分析"):
+        # V2.1 §8.1 在「输入参数」之后插入账单章节，时序章节整体顺延一位
+        for section in ("四、负荷分析", "五、PV时序分析", "六、储能SOC分析"):
             assert placed.get(section, 0) >= 1, f"{section} 缺少图表"
 
     def test_no_charts_when_timeseries_disabled(self, v1_case):
