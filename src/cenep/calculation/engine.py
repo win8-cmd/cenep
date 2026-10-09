@@ -423,7 +423,22 @@ class CalculationEngine:
                     pv_self_use_kwh=v2.pv_self_use if v2 else allocation.direct_use,
                     pv_export_kwh=v2.pv_export if v2 else allocation.export,
                     pv_to_storage_kwh=v2.pv_to_storage if v2 else allocation.to_storage,
-                    pv_loss_kwh=allocation.loss,
+                    pv_loss_kwh=(
+                        # V2 覆盖分支：损耗必须与同源的电量口径一致，否则
+                        # ``发电量 = 自用 + 进储能 + 上网 + 损耗`` 不成立，
+                        # validate_energy_balance 会把**合法**的时序项目判为不守恒。
+                        # V2 的分派已保证光伏电量分配闭合，因此残差即该年度的限发电量
+                        # （若储能允许上网且上网量大于限发量，残差可为负——此时报告层应
+                        # 结合 8760 明细判读，不得据此判定计算失败）。
+                        float(v2.pv_generation)
+                        - (
+                            float(v2.pv_self_use)
+                            + float(v2.pv_to_storage)
+                            + float(v2.pv_export)
+                        )
+                        if v2 is not None
+                        else allocation.loss
+                    ),
                     storage_available_kwh=storage_year.available_energy_kwh,
                     storage_charge_kwh=v2.storage_charge if v2 else storage_year.charge_energy_kwh,
                     storage_discharge_kwh=(

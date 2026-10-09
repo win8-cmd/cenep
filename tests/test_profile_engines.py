@@ -445,6 +445,157 @@ class TestPVTypicalDayAndFactors:
         assert pp.peak_power(np.array([])) == 0.0
 
 
+class TestPVHourlyScalingIsResolutionInvariant:
+    """HOURLY 曲线按容量缩放时，**同一物理曲线**在不同粒度下必须给出同一年电量。
+
+    缺陷背景（东风本田 17.233 MWp 真实资料复核发现）
+    ------------------------------------------------
+    ``resolve_pv_series`` 的 HOURLY 分支用 ``normalize_profile(raw, curve_capacity)``
+    把导入曲线归一化为"相对额定容量的出力系数"。但 ``raw`` 是**每个周期的电量**
+    （``pv_generation_kwh``），而 §9.1 定义的系数是 **功率 ÷ 容量**。
+    二者仅在 Δt = 1 h 时相等：15 分钟粒度下电量 = 功率 × 0.25，
+    于是系数被低估 4 倍，最终年发电量、等效利用小时、以及依赖发电量的消纳率
+    全部被低估 4 倍（日粒度低估 24 倍）；``check_coefficient_bounds`` 也随之一并失效。
+
+    真实验证：东风本田 15 分钟出力曲线（1141.04 等效小时）走该路径后只剩 285.26 h。
+    """
+
+    @staticmethod
+    def _profile(axis, cap_kw: float, peak_kw: float) -> PVProfile:
+        """构造"每日正午峰值 = peak_kw、其余时段线性衰减"的出力曲线（电量 = 功率 × Δt）。"""
+        dt = axis.delta_hours
+        hour = np.asarray(axis.hour, dtype=float)
+        power = peak_kw * np.maximum(0.0, 1.0 - np.abs(hour - 12.0) / 6.0)
+        pts = [
+            TimeSeriesPoint(
+                timestamp=axis.timestamps[i],
+                pv_generation_kwh=float(power[i] * dt),
+            )
+            for i in range(axis.point_count)
+        ]
+        return PVProfile(resolution=axis.resolution, points=pts, capacity_kwp=cap_kw)
+
+    @staticmethod
+    def _constant_profile(axis, cap_kw: float, power_kw: float) -> PVProfile:
+        """恒定功率曲线：任何粒度下年电量都必须是 ``power_kw × 全年小时数``。"""
+        dt = axis.delta_hours
+        pts = [
+            TimeSeriesPoint(timestamp=t, pv_generation_kwh=power_kw * dt)
+            for t in axis.timestamps
+        ]
+        return PVProfile(resolution=axis.resolution, points=pts, capacity_kwp=cap_kw)
+
+    def test_daily_resolution_same_annual_energy_as_hourly(self, axis):
+        """日粒度（Δt = 24 h）与小时粒度必须给出**完全相同**的年电量与等效小时。"""
+        dt_daily = Resolution.DAILY.delta_hours
+        axis_daily = build_time_axis(2025, resolution=Resolution.DAILY)
+        cap = 1000.0
+
+        hourly = pp.resolve_pv_series(
+            PVProfileConfig(
+                mode=PVProfileMode.HOURLY,
+                hourly=self._constant_profile(axis, cap, cap),
+                performance_ratio=1.0,
+            ),
+            axis,
+            cap,
+        )
+        daily = pp.resolve_pv_series(
+            PVProfileConfig(
+                mode=PVProfileMode.HOURLY,
+                hourly=self._constant_profile(axis_daily, cap, cap),
+                performance_ratio=1.0,
+            ),
+            axis_daily,
+            cap,
+        )
+        # 恒定功率 = 容量 ⇒ 年电量 = 容量 × 全年小时数（与粒度无关）
+        assert pp.equivalent_hours(hourly, cap) == pytest.approx(8760.0, rel=1e-9)
+        assert pp.equivalent_hours(daily, cap) == pytest.approx(8760.0, rel=1e-9)
+        assert pp.annual_generation(daily) == pytest.approx(
+            pp.annual_generation(hourly), rel=1e-9
+        )
+        assert dt_daily == pytest.approx(24.0)
+
+    def test_quarter_hourly_same_annual_energy_as_hourly(self, axis):
+        """15 分钟粒度（Δt = 0.25 h）与小时粒度必须给出同一年电量（真实资料场景）。"""
+        axis_qh = build_time_axis(2025, resolution=Resolution.QUARTER_HOURLY)
+        cap = 17_233.0
+
+        hourly = pp.resolve_pv_series(
+            PVProfileConfig(
+                mode=PVProfileMode.HOURLY,
+                hourly=self._constant_profile(axis, cap, cap),
+                performance_ratio=1.0,
+            ),
+            axis,
+            cap,
+        )
+        qh = pp.resolve_pv_series(
+            PVProfileConfig(
+                mode=PVProfileMode.HOURLY,
+                hourly=self._constant_profile(axis_qh, cap, cap),
+                performance_ratio=1.0,
+            ),
+            axis_qh,
+            cap,
+        )
+        assert pp.annual_generation(qh) == pytest.approx(pp.annual_generation(hourly), rel=1e-9)
+        assert pp.equivalent_hours(qh, cap) == pytest.approx(
+            pp.equivalent_hours(hourly, cap), rel=1e-9
+        )
+        assert pp.equivalent_hours(qh, cap) == pytest.approx(8760.0, rel=1e-9)
+
+    def test_quarter_hourly_peak_power_preserved(self, axis):
+        """15 分钟粒度下解析结果的峰值功率必须等于输入曲线的峰值功率。"""
+        axis_qh = build_time_axis(2025, resolution=Resolution.QUARTER_HOURLY)
+        cap = 1000.0
+        out = pp.resolve_pv_series(
+            PVProfileConfig(
+                mode=PVProfileMode.HOURLY,
+                hourly=self._profile(axis_qh, cap, cap),
+                performance_ratio=1.0,
+            ),
+            axis_qh,
+            cap,
+        )
+        assert pp.peak_power(out, axis_qh) == pytest.approx(cap, rel=1e-9)
+
+    def test_quarter_hourly_coefficient_bounds_still_enforced(self, axis):
+        """15 分钟粒度下"曲线容量填小了"仍必须报中文错误（越界检查不能被 Δt 掩盖）。"""
+        axis_qh = build_time_axis(2025, resolution=Resolution.QUARTER_HOURLY)
+        dt = axis_qh.delta_hours
+        # 曲线容量只有 1 kW，但每个 15 分钟发出 5 kWh（折算功率 20 kW）→ 系数 20 > 1
+        pts = [
+            TimeSeriesPoint(timestamp=t, pv_generation_kwh=5.0) for t in axis_qh.timestamps
+        ]
+        prof = PVProfile(resolution=Resolution.QUARTER_HOURLY, points=pts, capacity_kwp=1.0)
+        with pytest.raises(ValidationError, match="归一化出力系数越界"):
+            pp.resolve_pv_series(
+                PVProfileConfig(mode=PVProfileMode.HOURLY, hourly=prof),
+                axis_qh,
+                capacity_kwp=1000.0,
+            )
+        assert dt == pytest.approx(0.25)
+
+    def test_hourly_resolution_result_unchanged(self, axis):
+        """Δt = 1 h 时修复前后必须**逐位一致**（不得改变既有小时口径结果）。"""
+        cap = 1000.0
+        out = pp.resolve_pv_series(
+            PVProfileConfig(
+                mode=PVProfileMode.HOURLY,
+                hourly=self._profile(axis, cap, cap),
+                performance_ratio=1.0,
+            ),
+            axis,
+            cap,
+        )
+        # 峰值功率 = 容量的形状：系数峰值 1.0 ⇒ 年电量 = Σ(输入电量)
+        prof = self._profile(axis, cap, cap)
+        raw = np.array([p.pv_generation_kwh for p in prof.points], dtype=float)
+        assert np.allclose(out, raw, rtol=0.0, atol=1e-9)
+
+
 # =========================================================================== #
 # 电价
 # =========================================================================== #

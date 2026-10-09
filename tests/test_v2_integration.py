@@ -468,3 +468,52 @@ class TestEngineWiring:
         assert [r.project_cashflow for r in a.annual_results] == [
             r.project_cashflow for r in b.annual_results
         ]
+
+    def test_override_keeps_pv_energy_balance_when_loss_ratio_set(self):
+        """§105：注入时序口径后，年度行的光伏电量必须仍然守恒（含 loss_ratio > 0）。
+
+        缺陷背景（东风本田 17.233 MWp 真实资料复核发现）
+        ------------------------------------------------
+        ``engine._calculate_core`` 在 V2 覆盖分支里只替换了发电量 / 自用 / 进储能 /
+        上网四个量，``pv_loss_kwh`` 仍取 **V1 年度分配**的 ``allocation.loss``
+        （= V1 发电量 × loss_ratio）。而 V2 之所以存在，正是因为真实 8760 曲线的
+        年发电量 ≠ ``容量 × 等效小时 × PR``；此时
+        ``发电量(V2) = 自用 + 进储能 + 上网(V2) + 损耗(V1)`` 必然不成立，
+        ``validate_energy_balance`` 会判定"光伏电量不守恒"，
+        **合法的 V2 项目直接算不出来**（V2 §19：超限判定计算失败）。
+
+        复现：V1 口径 1,100,000 kWh、导入曲线 900,000 kWh、loss_ratio 2%
+        → 误差 −22,000 kWh，抛 ``EnergyBalanceError``。
+        """
+        proj = build_project()
+        proj.pv.loss_ratio = 0.02
+        sim = e2.simulate_year(proj, axis_for(), 1)
+        override = e2.ProjectSimulation(axis=axis_for(), years=[sim]).overrides()
+        result = calculation_engine.calculate(proj, year_override=override)
+        row = result.annual_results[0]
+        rhs = (
+            row.pv_self_use_kwh
+            + row.pv_to_storage_kwh
+            + row.pv_export_kwh
+            + row.pv_loss_kwh
+        )
+        assert row.pv_generation_kwh == pytest.approx(rhs, abs=1e-6)
+
+    def test_override_reports_curtailment_as_loss(self):
+        """注入时序口径后 ``pv_loss_kwh`` 应等于该年度的**限发电量**（残差），而非 V1 损耗。"""
+        proj = build_project()
+        proj.pv.loss_ratio = 0.02
+        sim = e2.simulate_year(proj, axis_for(), 1)
+        curtail = float(np.sum(sim.outcome.pv_curtailed))
+        override = e2.ProjectSimulation(axis=axis_for(), years=[sim]).overrides()
+        result = calculation_engine.calculate(proj, year_override=override)
+        assert result.annual_results[0].pv_loss_kwh == pytest.approx(curtail, abs=1e-6)
+
+    def test_v1_loss_ratio_semantics_unchanged_without_override(self):
+        """§1.1：不注入时序口径时，``pv_loss_kwh`` 仍严格等于 V1 的发电量 × loss_ratio。"""
+        proj = build_project()
+        proj.pv.loss_ratio = 0.02
+        proj.timeseries.enabled = False
+        result = calculation_engine.calculate(proj)
+        row = result.annual_results[0]
+        assert row.pv_loss_kwh == pytest.approx(row.pv_generation_kwh * 0.02, rel=1e-12)

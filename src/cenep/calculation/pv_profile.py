@@ -172,11 +172,16 @@ def resolve_pv_series(
         raw = np.fromiter((p.pv_generation_kwh for p in points), dtype=float, count=n)
         curve_capacity = float(config.hourly.capacity_kwp)
         if curve_capacity > 0.0:
-            coefficient = normalize_profile(raw, curve_capacity)
+            # §9.1 的系数定义是「功率 ÷ 容量」，而导入曲线存的是**每周期电量**
+            # （``pv_generation_kwh``）。因此必须先除以 Δt 折算为平均功率再归一化：
+            # 否则 Δt ≠ 1 h 时系数会被整体乘上 Δt（15 分钟粒度低估 4 倍、日粒度低估 24 倍），
+            # 年发电量、等效利用小时与消纳率随之被同比例低估，越界检查也一并失效。
+            # Δt = 1 h 时本式与旧实现逐位一致。
+            coefficient = normalize_profile(raw / dt, curve_capacity)
             check_coefficient_bounds(coefficient, field="timeseries.pv.hourly")
             values = coefficient * target * pr * dt
         else:
-            # 曲线视为本项目在该容量下的实际发电量
+            # 曲线视为本项目在该容量下的实际发电量（电量口径，无需按 Δt 折算）
             values = raw * pr
 
     elif config.mode is PVProfileMode.TYPICAL_DAY:
