@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -1919,6 +1920,7 @@ class BillsPage(QWidget):
             self.forms[section.title] = form
             group_layout.addWidget(form)
             box.addWidget(group)
+        self._install_missing_value_display()
         self.form_status = QLabel("", page)
         self.form_status.setWordWrap(True)
         box.addWidget(self.form_status)
@@ -2205,6 +2207,43 @@ class BillsPage(QWidget):
     # ------------------------------------------------------------------ #
     # 录入 / 编辑 / 删除 / 复制（§5.4）
     # ------------------------------------------------------------------ #
+    def _install_missing_value_display(self) -> None:
+        """让"未勾选「填写」"的数值字段直接显示「账单未提供」，而不是 0（§2.1）。
+
+        只作用于**账单页自己的表单**（不改 `ui/field_spec.py::FieldRow` 的既有行为，
+        因此参数页等既有页面的显示一字未变）：
+
+        * 数值框的"最小值专显文本"设为「账单未提供」，并在勾选框切换时把数值
+          复位到最小值 / 0 —— 未勾选 → 显示「账单未提供」；勾选 → 从 0 开始录入；
+        * 读取值时仍以勾选框为准（未勾选 → ``None``），见 :meth:`form_payload`。
+        """
+        for form in self.forms.values():
+            for row in form.rows.values():
+                editor = row.editor
+                if not row.spec.is_nullable or not isinstance(editor, (QDoubleSpinBox, QSpinBox)):
+                    continue
+                editor.setSpecialValueText(BILL_NOT_PROVIDED)
+                if row.checkbox is not None:
+                    row.checkbox.toggled.connect(
+                        lambda checked, widget=editor: widget.setValue(
+                            0.0 if checked else widget.minimum()
+                        )
+                    )
+
+    def _show_missing_in_editors(self) -> None:
+        """把**未勾选**的数值框复位到最小值（从而显示「账单未提供」）。
+
+        已勾选（= 账单确实提供了该字段）的数值框保持原值，因此本方法可以在载入账单后安全调用。
+        """
+        for form in self.forms.values():
+            for row in form.rows.values():
+                editor = row.editor
+                if not row.spec.is_nullable or not isinstance(editor, (QDoubleSpinBox, QSpinBox)):
+                    continue
+                if row.checkbox is not None and row.checkbox.isChecked():
+                    continue
+                editor.setValue(editor.minimum())
+
     def new_bill(self) -> None:
         """清空表单，准备录入一条新账单（账期默认取本月自然月）。"""
         self._editing_id = None
@@ -2219,6 +2258,7 @@ class BillsPage(QWidget):
         self.forms[BILL_SECTIONS[0].title].rows["billing_period_end"].set_value(
             date(today.year, today.month, last_day)
         )
+        self._show_missing_in_editors()
         self.form_status.setText("正在录入新账单（尚未保存）。填写完成后点击「保存账单」。")
         self.tabs.setCurrentIndex(1)
 
@@ -2228,6 +2268,7 @@ class BillsPage(QWidget):
         for form in self.forms.values():
             for row in form.rows.values():
                 row.set_value(None)
+        self._show_missing_in_editors()
         self.form_status.setText("表单已清空（项目中的账单未受影响）。")
 
     def form_payload(self) -> dict:
@@ -2262,6 +2303,7 @@ class BillsPage(QWidget):
         for form in self.forms.values():
             for path, row in form.rows.items():
                 row.set_value(getattr(target, path, None))
+        self._show_missing_in_editors()
         self.form_status.setText(
             f"正在编辑账单 {target.bill_id}"
             f"（来源：{target.source_type.label}；质量状态：{target.quality_status.label}；"

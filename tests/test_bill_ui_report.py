@@ -425,6 +425,35 @@ class TestMissingValueDisplay:
         assert values["年度账单总额"] == "0.00 元"
         assert values["平均综合电价"] == "无法计算（账单未提供电量或金额）"
 
+    def test_unchecked_form_field_displays_not_provided_not_zero(self, page):
+        """表单层面同样不得把"未提供"显示成 0（未勾选「填写」→ 显示「账单未提供」）。"""
+        page.new_bill()
+        row = page.forms["电量（kWh）"].rows["energy_total_kwh"]
+        assert row.checkbox is not None and not row.checkbox.isChecked()
+        assert row.editor.text() == BILL_NOT_PROVIDED
+        assert row.value() is None
+        assert page.form_payload()["energy_total_kwh"] is None
+
+        # 勾选后从 0 开始录入，此时 0 是"用户确实填了 0"，必须显示为 0
+        row.checkbox.setChecked(True)
+        row.editor.setValue(0.0)
+        assert row.value() == 0.0
+        assert page.form_payload()["energy_total_kwh"] == 0.0
+
+        page.clear_form()
+        assert row.editor.text() == BILL_NOT_PROVIDED
+        assert page.form_payload()["energy_total_kwh"] is None
+
+    def test_loaded_bill_keeps_real_values_in_form(self, page, service):
+        bill = _create(service, energy_total_kwh=123_456.0, bill_total_yuan=80_000.0)
+        page.load_bill_into_form(bill)
+        energy_editor = page.forms["电量（kWh）"].rows["energy_total_kwh"].editor
+        amount_editor = page.forms["费用（元）"].rows["bill_total_yuan"].editor
+        assert float(energy_editor.text().replace(",", "")) == pytest.approx(123_456.0)
+        assert float(amount_editor.text().replace(",", "")) == pytest.approx(80_000.0)
+        # 账单里没有提供的分项 → 显示「账单未提供」
+        assert page.forms["费用（元）"].rows["vat_yuan"].editor.text() == BILL_NOT_PROVIDED
+
     def test_excel_and_pdf_never_show_zero_for_missing(self, project, service, tmp_path: Path):
         _create(service, energy_total_kwh=None, bill_total_yuan=None)
         result = calculation_engine.calculate(project)
