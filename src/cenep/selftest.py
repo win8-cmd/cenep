@@ -9,6 +9,11 @@
 
 **重要**：自检会在每个阶段结束时把报告写回文件（``stage`` 字段），
 这样即使进程被硬崩溃或弹出异常对话框，也能从文件看出卡在哪一步。
+
+**不得把表数 / 章节数硬编码在这里**（阶段 7 修正）：自检引用
+:data:`cenep.reports.excel_exporter.SHEET_NAMES` 与
+:data:`cenep.reports.pdf_exporter.REPORT_SECTIONS` 的**长度**，
+以后新增工作表或章节只需改这两处清单，自检自动跟随（V2.4 §8.1）。
 """
 
 from __future__ import annotations
@@ -145,14 +150,35 @@ def run_selftest(output: str | None = None) -> int:
 
     try:
         from openpyxl import load_workbook
+        from reportlab.platypus import Paragraph, Table
 
         from .calculation.engine import calculation_engine
         from .domain.enums import ScenarioType, SensitivityVariable
         from .reports.excel_exporter import SHEET_NAMES, ExcelExporter
-        from .reports.pdf_exporter import REPORT_SECTIONS, PdfExporter
+        from .reports.pdf_exporter import (
+            REPORT_SECTIONS,
+            PdfExporter,
+            _styles,
+            register_cjk_font,
+            section_title,
+        )
 
         report["stage"] = "imports-ok"
+        report["declared_sheets"] = len(SHEET_NAMES)
+        report["declared_sections"] = len(REPORT_SECTIONS)
         _dump(report, output)
+
+        def _story_text(flowables) -> str:
+            """递归收集文档流文本（自检用；PDF 正文是压缩流，只能从 story 侧核验）。"""
+            parts: list[str] = []
+            for item in flowables:
+                if isinstance(item, Paragraph):
+                    parts.append(item.text)
+                elif isinstance(item, Table):
+                    for row in item._cellvalues:
+                        for cell in row:
+                            parts.append(cell if isinstance(cell, str) else _story_text([cell]))
+            return "\n".join(parts)
 
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
@@ -189,20 +215,25 @@ def run_selftest(output: str | None = None) -> int:
 
                 report["stage"] = f"{project_type.value}:pdf"
                 _dump(report, output)
+                story = PdfExporter().build_story(project, result, _styles(register_cjk_font()))
                 pdf_path = PdfExporter().export(project, result, out_dir / f"{project_type.value}")
 
                 report["stage"] = f"{project_type.value}:verify"
                 _dump(report, output)
                 sheets = load_workbook(excel_path).sheetnames
-                assert sheets == SHEET_NAMES, "Excel 工作表不符合规范（V1 §108 / V2 §67 / V2.1 §8.1 / V2.2 §6.3）"
+                assert sheets == SHEET_NAMES, "Excel 工作表不符合规范（V1 §108 / V2 §67 / V2.1 §8.1 / V2.2 §6.3 / V2.4 §8.1）"
+                # 工作表数与章节数**引用清单长度**，不再硬编码（阶段 7 修正）
+                assert len(sheets) == len(SHEET_NAMES)
                 assert pdf_path.stat().st_size > 5000, "PDF 输出过小"
-                # V2 §66 由 15 章重组为 16 部分；V2.1 §8.1（阶段 2）新增
-                # 「账单事实与校验」；V2.2 §6.3（阶段 4）新增「负荷估算与光伏消纳」，共 18 部分
-                assert len(REPORT_SECTIONS) == 18
-                # V2 §67 工作表由 13 张扩展为 24 张；V2.1 §8.1 再新增
-                # 「账单原始数据」「账单校验」；V2.2 §6.3 再新增「消纳率分析」，共 27 张
-                # （V1 的 13 张全部保留）
-                assert len(sheets) == 27
+                assert len(REPORT_SECTIONS) > 0
+                # 每个声明的章节都必须在文档流里真实出现（章节号为中文数字，由 section_title 生成）
+                story_text = _story_text(story)
+                missing = [
+                    name
+                    for index, name in enumerate(REPORT_SECTIONS)
+                    if section_title(index) not in story_text
+                ]
+                assert missing == [], f"PDF 缺少章节：{missing}"
 
                 report["projects"].append(
                     {
@@ -215,6 +246,7 @@ def run_selftest(output: str | None = None) -> int:
                         "lcoe": result.lcoe,
                         "lcos": result.lcos,
                         "excel_sheets": len(sheets),
+                        "pdf_sections": len(REPORT_SECTIONS),
                         "pdf_bytes": pdf_path.stat().st_size,
                     }
                 )

@@ -31,6 +31,7 @@ from cenep.reports.pdf_exporter import (  # noqa: E402
     PdfExporter,
     _styles,
     register_cjk_font,
+    section_title,
 )
 from cenep.ui.load_pages import (  # noqa: E402
     ESTIMATE_BANNER,
@@ -66,10 +67,27 @@ def _prepare(window, annual_energy: float = 1_200_000.0):
 # 页面结构（§6.3）
 # --------------------------------------------------------------------------- #
 class TestPageStructure:
-    def test_three_sections(self, qapp):
+    def test_four_sections(self, qapp):
+        """V2.2 §6.3 A/B/C 三段；V2.4 §8.4（阶段 7）**追加** D 段「光储场景对比」。
+
+        追加方式与 V2.1/V2.2 一致：既有三段标题一字未改，只在末尾新增一段；
+        主界面**标签页数量不变**（仍为 10 个），因此不改变既有导航结构。
+        """
         page = LoadAnalysisPage()
         titles = [page.tabs.tabText(i) for i in range(page.tabs.count())]
-        assert titles == ["A 数据来源", "B 负荷画像", "C 消纳分析"]
+        assert titles == ["A 数据来源", "B 负荷画像", "C 消纳分析", "D 光储场景对比"]
+
+    def test_scenario_section_widgets_exist(self, qapp):
+        """§7.1 / §7.6：D 段必须提供电价计划选择、执行按钮与三张结果表 + 一致性文本。"""
+        page = LoadAnalysisPage()
+        assert page.scenario_plan_combo is not None
+        assert page.scenario_run_button is not None
+        assert page.scenario_table is not None
+        assert page.comparison_table is not None
+        assert page.dedup_table is not None
+        assert page.scenario_detail_view.isReadOnly()
+        assert page.scenario_combo_plan_id() == ""
+        assert page.last_scenario is None
 
     def test_source_choices_cover_both_inputs(self, qapp):
         page = LoadAnalysisPage()
@@ -465,7 +483,7 @@ class TestPdfLoadConsumptionSection:
         text = "\n".join(
             getattr(item, "text", "") or _flatten_table(item) for item in story
         )
-        assert "五、负荷估算与光伏消纳" in text
+        assert section_title(REPORT_SECTIONS.index("负荷估算与光伏消纳")) in text
         for token in ("光伏自用率", "负荷覆盖率", "光伏上网率", "电网依赖率", "分母", "边界"):
             assert token in text, f"PDF 章节缺少：{token}"
         assert "估算" in text
@@ -476,7 +494,7 @@ class TestPdfLoadConsumptionSection:
         styles = _styles(register_cjk_font())
         story = PdfExporter().build_story(golden_pv_storage, result, styles)
         text = "\n".join(getattr(item, "text", "") or "" for item in story)
-        assert "五、负荷估算与光伏消纳" in text
+        assert section_title(REPORT_SECTIONS.index("负荷估算与光伏消纳")) in text
         assert "尚未执行负荷与消纳分析" in text
 
     def test_pdf_file_written(self, exported_with_analysis):

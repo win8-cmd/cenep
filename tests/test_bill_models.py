@@ -382,9 +382,11 @@ class TestBillsPersistence:
         payload = {"schema_version": "2.0"}
         once, notes = ensure_bill_section(payload)
         assert notes and once["bills"] == []
+        # V2.4 §8.2：补齐函数对**单个段**也是幂等的（第二次调用不再补、不再写留痕）
         twice, again = ensure_bill_section(once)
         assert again == []
         assert twice["bills"] == []
+        assert twice["migration_notes"] == once["migration_notes"]
 
     def test_ensure_bill_section_never_touches_existing_bills(self):
         payload = {"bills": [{"bill_id": "X"}]}

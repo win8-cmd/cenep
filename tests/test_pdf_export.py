@@ -12,8 +12,17 @@ from cenep.reports.pdf_exporter import (
     DISCLAIMER,
     DISCLAIMER_2,
     REPORT_SECTIONS,
+    SECTION_BILL,
+    SECTION_CALIBRATION,
+    SECTION_CONSUMPTION,
+    SECTION_DATA_QUALITY,
+    SECTION_ECONOMICS,
+    SECTION_LOAD_ANALYSIS,
+    SECTION_MONTHLY_BILL,
+    SECTION_SCENARIO_BILL,
     PdfExporter,
     register_cjk_font,
+    section_title,
 )
 
 
@@ -41,23 +50,49 @@ def exported(golden_pv_storage, tmp_path: Path):
 
 
 class TestReportStructure:
-    def test_eighteen_sections_declared(self):
-        """V2 §66 由 V1 §110 的 15 章重组为 16 部分；V2.1 §8.1 新增「账单事实与校验」→ 17 部分；
-        V2.2 §6.3（阶段 4）新增「负荷估算与光伏消纳」→ **18 部分**。"""
-        assert len(REPORT_SECTIONS) == 18
+    def test_section_count_comes_from_declaration(self):
+        """章节数**不得硬编码**：一律引用 :data:`REPORT_SECTIONS`（V2.4 §8.1 修正）。
+
+        历史：V2 §66 由 V1 §110 的 15 章重组为 16 部分；V2.1 §8.1 新增「账单事实与校验」→ 17；
+        V2.2 §6.3（阶段 4）新增「负荷估算与光伏消纳」→ 18；
+        V2.4 §8.1（阶段 7）新增 6 章 → 21，并把「经济指标」与「风险」合并为
+        「经济性指标与风险提示」、把「免责声明」并入「关键假设、未建模项与免责声明」。
+        """
+        assert len(REPORT_SECTIONS) == 21
         assert REPORT_SECTIONS[0] == "项目概况"
-        assert REPORT_SECTIONS[-1] == "免责声明"
+        assert REPORT_SECTIONS[-1] == "关键假设、未建模项与免责声明"
+        assert "免责声明" in REPORT_SECTIONS[-1]
+
+    def test_v24_sections_declared(self):
+        """V2.4 §8.1 的 6 个新增章节必须声明。"""
+        for name in (
+            "数据来源与质量等级", "基准账单校准", "月度电费分析",
+            "方案前后电费差额", "经济性指标与风险提示", "关键假设、未建模项与免责声明",
+        ):
+            assert name in REPORT_SECTIONS, f"缺少 V2.4 §8.1 要求的章节：{name}"
+
+    def test_section_numerals_are_strictly_ordered(self):
+        """章节序号必须与清单一一对应且严格递增（不得出现重复或跳号）。"""
+        titles = [section_title(index) for index in range(len(REPORT_SECTIONS))]
+        assert len(set(titles)) == len(titles)
+        for index, title in enumerate(titles):
+            assert title.endswith("、" + REPORT_SECTIONS[index])
 
     def test_v21_bill_section_declared(self):
-        """V2.1 §8.1（阶段 2）：账单章节必须声明，且位于「输入参数」之后、「负荷分析」之前。"""
+        """V2.1 §8.1（阶段 2）：账单章节位于「输入参数」之后、「负荷分析」之前。"""
         assert "账单事实与校验" in REPORT_SECTIONS
-        assert REPORT_SECTIONS.index("账单事实与校验") == REPORT_SECTIONS.index("输入参数") + 1
+        assert REPORT_SECTIONS.index("账单事实与校验") > REPORT_SECTIONS.index("输入参数")
         assert REPORT_SECTIONS.index("账单事实与校验") < REPORT_SECTIONS.index("负荷分析")
 
     def test_v22_load_consumption_section_declared(self):
-        """V2.2 §6.3（阶段 4）：负荷估算与光伏消纳章节必须声明，且位于「负荷分析」之后。"""
+        """V2.2 §6.3（阶段 4）：负荷估算与光伏消纳章节必须位于「负荷分析」之后。"""
         assert "负荷估算与光伏消纳" in REPORT_SECTIONS
         assert REPORT_SECTIONS.index("负荷估算与光伏消纳") == REPORT_SECTIONS.index("负荷分析") + 1
+
+    def test_v24_calibration_after_bill_and_before_load(self):
+        """V2.4 §8.1：基准账单校准紧跟账单章节，且在负荷章节之前。"""
+        assert REPORT_SECTIONS.index("基准账单校准") == REPORT_SECTIONS.index("账单事实与校验") + 1
+        assert REPORT_SECTIONS.index("基准账单校准") < REPORT_SECTIONS.index("负荷分析")
 
     def test_v2_sections_declared(self):
         """V2 §66 新增的 6 个时序章节必须出现在清单中。"""
@@ -72,9 +107,27 @@ class TestReportStructure:
         text = _collect_text(story)
         # 封面标题、"一、项目概况"… 依次出现
         assert "工商业新能源项目经济评价报告" in text
-        for section in REPORT_SECTIONS[1:]:
-            keyword = section
-            assert keyword in text, f"报告缺少章节：{section}"
+        for index, section in enumerate(REPORT_SECTIONS[1:], start=1):
+            assert section_title(index) in text, f"报告缺少章节：{section_title(index)}"
+
+    def test_caliber_legend_distinguishes_four_data_types(self, golden_pv_storage):
+        """§8.1 硬要求：实际账单 / 软件复算 / 模型估算 / 方案模拟不得混为一谈。"""
+        result = calculation_engine.calculate(golden_pv_storage)
+        styles = __import__("cenep.reports.pdf_exporter", fromlist=["_styles"])._styles(register_cjk_font())
+        text = _collect_text(PdfExporter().build_story(golden_pv_storage, result, styles))
+        for label in ("① 实际账单", "② 软件复算", "③ 模型估算", "④ 方案模拟"):
+            assert label in text, f"缺少数据口径说明：{label}"
+
+    def test_v24_sections_present_without_optional_payloads(self, golden_pv_storage):
+        """不传任何 V2.4 可选结果时，6 个新章节照常出现并写明操作路径（不缺章节、不臆造数值）。"""
+        result = calculation_engine.calculate(golden_pv_storage)
+        styles = __import__("cenep.reports.pdf_exporter", fromlist=["_styles"])._styles(register_cjk_font())
+        text = _collect_text(PdfExporter().build_story(golden_pv_storage, result, styles))
+        for section in (SECTION_DATA_QUALITY, SECTION_CALIBRATION, SECTION_MONTHLY_BILL,
+                        SECTION_SCENARIO_BILL, SECTION_ECONOMICS):
+            assert section in text
+        assert "未附带基准账单校准结果" in text
+        assert "未附带光储四场景对比结果" in text
 
 
 class TestFileOutput:

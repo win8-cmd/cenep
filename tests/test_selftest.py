@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 
 from cenep.__main__ import main
+from cenep.reports.excel_exporter import SHEET_NAMES
+from cenep.reports.pdf_exporter import REPORT_SECTIONS
 from cenep.selftest import run_selftest
 
 
@@ -27,10 +29,11 @@ class TestSelfTest:
             "PV_STORAGE",
         }
         for item in data["projects"]:
-            # V2 §67 起工作表由 13 张扩展为 24 张（V1 的 13 张全部保留）；
-            # V2.1 §8.1（阶段 2）再新增「账单原始数据」「账单校验」两张；
-            # V2.2 §6.3（阶段 4）再新增「消纳率分析」一张，共 27 张。
-            assert item["excel_sheets"] == 27
+            # V2.4 §8.1（阶段 7）：**不得把表数 / 章节数硬编码在测试里**，
+            # 一律引用清单长度（``SHEET_NAMES`` / ``REPORT_SECTIONS``），
+            # 以后加表加章节无需再改本测试（这正是前几轮暴露的设计问题）。
+            assert item["excel_sheets"] == len(SHEET_NAMES)
+            assert item["pdf_sections"] == len(REPORT_SECTIONS)
             assert item["pdf_bytes"] > 5000
 
     def test_selftest_values_match_engine(self, tmp_path: Path):

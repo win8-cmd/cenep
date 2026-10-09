@@ -1,0 +1,8 @@
+﻿.........................................................F.............. [ 96%]
+...                                                                      [100%]
+================================== FAILURES ===================================
+E   assert False
+     +  where False = any(<generator object TestWideTableBlocks.test_stale_date_header_is_reported_and_replaced.<locals>.<genexpr> at 0x0000017924A1DB10>)
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:703: assert False
+=========================== short test summary info ===========================
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_stale_date_header_is_reported_and_replaced

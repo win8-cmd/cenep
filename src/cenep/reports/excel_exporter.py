@@ -14,6 +14,14 @@ V1 的 13 张工作表（规范 §108）：
 
 V2 起为 **27 张**：V1 的 13 张全部保留且相对顺序不变，V2 §67 新增 11 张时序表，
 V2.1 §8.1 再新增「账单原始数据」「账单校验」两张，V2.2 §6.3 再新增「消纳率分析」一张。
+
+V2.4 §8.1（阶段 7）再**追加** 5 张：
+
+28. 月度电费分析  29. 负荷数据质量  30. 电价版本与来源  31. 方案电费对比
+32. 计算假设与警告
+
+追加方式与 V2.1 / V2.2 完全一致：**只新增、不删改**，既有的 27 张表名、顺序与内容一字未动，
+新表在无对应数据时输出中文说明（「不缺表、不报错、不臆造数值」）。
 """
 
 from __future__ import annotations
@@ -26,10 +34,17 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ..application.bill_service import BillService
+from ..application.scenario_service import ScenarioBillService
+from ..application.tariff_service import TariffService
 from ..domain.bill_models import BILL_FIELD_LABELS, label_of
 from ..domain.models import Project
 from ..domain.results import CalculationResult
 from ..infrastructure.logging_setup import get_logger
+from ..infrastructure.migration import (
+    BILL_SECTION_SCHEMA_VERSION,
+    CALCULATION_ENGINE_VERSION,
+    CURRENT_SCHEMA_VERSION,
+)
 
 logger = get_logger()
 
@@ -81,7 +96,48 @@ SHEET_NAMES = [
     # —— V1 原有 ——
     "政策依据",
     "参数来源",
+    # —— V2.4 阶段 7 新增（§8.1：追加式扩展，既有 27 张一字未动）——
+    "月度电费分析",
+    "负荷数据质量",
+    "电价版本与来源",
+    "方案电费对比",
+    "计算假设与警告",
 ]
+
+# --------------------------------------------------------------------------- #
+# V2.4 §8.1（阶段 7）：四类数据口径的**统一图例**
+#
+# 规格书 §8.1 硬要求：「报告必须区分：实际账单、软件复算、模型估算、方案模拟。
+# 不能用同一颜色/标题混为一谈。」因此这里定义一处权威文案，Excel 与 PDF 同源引用。
+# --------------------------------------------------------------------------- #
+CALIBER_LEGEND: tuple[tuple[str, str], ...] = (
+    (
+        "① 实际账单",
+        "用户手动录入或从账单 Excel 导入的**账单事实**，未经任何软件加工；"
+        "缺失字段显示「账单未提供」，**不按 0 计入**（V2.1 §2.1）。",
+    ),
+    (
+        "② 软件复算",
+        "按用户核验过的电价计划与电量逐时/逐月重算的金额，**只用于与①比较**；"
+        "差异超容差即标注「未通过账单校准」（V2.3 §7.4）。",
+    ),
+    (
+        "③ 模型估算",
+        "由月电量 + 可编辑典型负荷模板生成的估算曲线及据此得到的消纳率，"
+        "**不是实测**；来源标签一律带「估算」（V2.2 §0.2、§6.5）。",
+    ),
+    (
+        "④ 方案模拟",
+        "在相同负荷与相同电价计划下，对无光伏 / 仅光伏 / 仅储能 / 光储四场景的模拟账单"
+        "（V2.3 §7.1）；与①的差额是**唯一**收益入口（V2.3 §7.6）。",
+    ),
+)
+
+#: 表格里用来标注口径的短标签（避免用户把四类数据看成一类）
+CALIBER_TAG_ACTUAL = "实际账单"
+CALIBER_TAG_RECOMPUTED = "软件复算"
+CALIBER_TAG_ESTIMATED = "模型估算"
+CALIBER_TAG_SIMULATED = "方案模拟"
 
 _HEADER_FILL = PatternFill("solid", fgColor="DDEBF7")
 _TITLE_FONT = Font(bold=True, size=14)
@@ -1500,6 +1556,514 @@ def _sheet_self_consumption(wb: Workbook, self_consumption, load_portrait) -> No
 
 
 # --------------------------------------------------------------------------- #
+# V2.4 §8.1（阶段 7）：新增 5 张工作表
+#
+# 设计要点（与本文件既有约定一致）：
+# * **工作簿内公式数必须为 0**（V1 §109 / V2 §61）：全部写算好的值；
+# * 无数据时**照常生成**并给出中文说明与操作路径，不缺表、不报错（§8.2）；
+# * 数值全部来自应用服务已经算好的结果对象
+#   （``BillService`` / ``TariffService`` / ``ScenarioBillService`` / ``LoadPortrait``），
+#   报表层**不做任何算术**（§0.2：核心公式唯一实现在 ``calculation/``）；
+# * 四类数据（实际账单 / 软件复算 / 模型估算 / 方案模拟）在每张表里都带口径标签，
+#   并用 :data:`CALIBER_LEGEND` 统一说明（§8.1「不能用同一颜色/标题混为一谈」）。
+# --------------------------------------------------------------------------- #
+#: 计划版本表在既有数据里最多展示几条（避免把版本库全量倒进报告）
+_PLAN_ROWS_LIMIT = 4
+
+MONTHLY_BILL_EMPTY_TEXT = "本项目尚未录入电费账单，无法进行月度电费分析。"
+LOAD_QUALITY_EMPTY_TEXT = "本项目尚未导入或估算任何负荷数据集，无负荷数据质量可评分。"
+LOAD_QUALITY_HOWTO = (
+    "操作路径：在「负荷与消纳」页面 A 区选择「月账单估算」或「实测高频负荷导入」，"
+    "生成 / 导入负荷曲线后回到本表重新导出报告。"
+)
+TARIFF_VERSION_NOTE = (
+    "说明：电价计划存放于软件的**版本库（SQLite）**，不写进 .nep 项目文件；"
+    "本表只列出报告导出时版本库中登记的计划及其来源与核验状态（§7.3、§8.1）。"
+)
+TARIFF_VERSION_HOWTO = (
+    "操作路径：在「月度账单」页或电价计划区载入内置计划 / 按账单反算 / 手工录入，"
+    "并填写来源、文号、适用范围与核验人后重新导出报告。"
+)
+SCENARIO_COMPARE_EMPTY_TEXT = "尚未执行光储四场景账单对比，本表无方案模拟数据。"
+SCENARIO_COMPARE_HOWTO = (
+    "操作路径：在「负荷与消纳」页面「D 光储场景对比」中选择电价计划并点击"
+    "「执行四场景对比」（无光伏 / 仅光伏 / 仅储能 / 光储，V2.3 §7.1）。"
+)
+SCENARIO_COMPARE_BOUNDARY = (
+    "口径分界：本表全部为**方案模拟**结果（④），不得与「账单原始数据」表的**实际账单**（①）"
+    "或「账单校验」表的软件复算（②）混为一谈；账单节省额是唯一收益入口，"
+    "储能套利 / 光伏自用只做分解展示、**不再次累加**（V2.3 §7.6）。"
+)
+ASSUMPTION_EMPTY_NOTE = "本项目没有额外的计算假设或警告需要披露。"
+ASSUMPTION_BOUNDARY = (
+    "口径分界（§8.1）：① 实际账单来自用户录入/导入；② 软件复算按核验过的电价计划重算，"
+    "仅用于与①比较；③ 模型估算由月电量 + 可编辑模板生成，不是实测；"
+    "④ 方案模拟是四场景对比结果。四类数据在本工作簿的不同表中分列，请勿混用。"
+)
+
+
+def _plan_summaries_for_report() -> list[dict[str, object]]:
+    """从电价**版本库**取计划摘要；版本库不可用时返回空列表（表照常生成）。"""
+    try:
+        service = TariffService(Project())
+        return service.plan_summaries()
+    except Exception as exc:  # pragma: no cover - 版本库异常不得阻断报告导出
+        logger.warning("读取电价版本库失败，电价版本与来源表将只输出说明：%s", exc)
+        return []
+
+
+def _sheet_monthly_bill_analysis(wb: Workbook, project: Project, result: CalculationResult) -> None:
+    """月度电费分析（V2.4 §8.1；数据同源于 V2.1 §3.1、§5.1）。"""
+    ws = wb.create_sheet("月度电费分析")
+    headers = [
+        "月份",
+        "账单条数",
+        "总购电量（kWh）",
+        "账单总额（元）",
+        "平均综合电价（元/kWh）",
+        "跨月账期",
+        "是否重叠",
+        "质量状态",
+        "电量缺失条数",
+        "金额缺失条数",
+        "说明与警告",
+    ]
+    row = _write_title(
+        ws,
+        f"月度电费分析（口径：{CALIBER_TAG_ACTUAL}；V2.1 §3.1、V2.4 §8.1）",
+        len(headers),
+    )
+    bills = sorted(project.bills, key=_bill_sort_key)
+    if not bills:
+        _write_bill_empty_note(ws, row)
+        _auto_width(ws, max_width=60)
+        return
+
+    service = BillService(project)
+    summary = service.annual_summary()
+    outcomes = {item.bill_id: item for item in service.reconcile_all()}
+    messages_by_month: dict[str, list[str]] = {}
+    for bill in bills:
+        item = outcomes.get(bill.bill_id)
+        texts = {
+            f"{issue.level}[{issue.code or '—'}]：{issue.message}"
+            for issue in (item.issues if item is not None else [])
+        }
+        texts.update(bill.quality_messages)
+        bucket = messages_by_month.setdefault(bill.billing_month, [])
+        for text in sorted(texts):
+            if text not in bucket:
+                bucket.append(text)
+
+    row = _write_rows(
+        ws,
+        row,
+        [
+            ["账单年份", summary.year, "", "", "", "", "", "", "", "", "按账期归属年份"],
+            ["覆盖月份数", len(summary.months_covered), "", "", "", "", "", "", "", "",
+             "、".join(summary.months_covered) or "无"],
+            ["月份覆盖率", summary.coverage_ratio, "", "", "", "", "", "", "", "",
+             "已覆盖月 / 12；缺月时年度电量不得直接相加"],
+            ["是否可直接相加", "是" if summary.can_sum_directly else "否", "", "", "", "", "", "", "", "",
+             "「否」时本表只作逐月展示，不得作为完整年度基准账单"],
+        ],
+        formats={2: _NUM4},
+    )
+    row += 1
+
+    row = _write_header_at(ws, row, headers)
+    data: list[list] = []
+    for item in summary.monthly:
+        data.append(
+            [
+                item.billing_month,
+                item.bill_count,
+                item.energy_total_kwh if item.energy_total_kwh is not None else BILL_NOT_PROVIDED_TEXT,
+                item.amount_total_yuan if item.amount_total_yuan is not None else BILL_NOT_PROVIDED_TEXT,
+                item.average_price_yuan_per_kwh
+                if item.average_price_yuan_per_kwh is not None
+                else BILL_NOT_PROVIDED_TEXT,
+                "是" if item.has_cross_month else "否",
+                "是" if item.has_overlap else "否",
+                item.quality_status.label,
+                item.energy_missing_bills,
+                item.amount_missing_bills,
+                "；".join(messages_by_month.get(item.billing_month, [])) or "未发现问题",
+            ]
+        )
+    row = _write_rows(
+        ws,
+        row,
+        data,
+        formats={3: _NUM4, 4: _MONEY, 5: _NUM4},
+    )
+    row += 1
+
+    for text in summary.messages:
+        ws.cell(row=row, column=1, value=text)
+        row += 1
+    for text in summary.assumptions:
+        ws.cell(row=row, column=1, value=text)
+        row += 1
+    ws.cell(
+        row,
+        column=1,
+        value=(
+            f"口径：平均综合电价 P_avg = 账单总额 ÷ 总购电量，仅为**{CALIBER_TAG_ACTUAL}统计口径**，"
+            "不等于光伏自用电量的边际节省电价（基本电费、需量电费、税费未必随购电量同比例变化，V2.1 §3.1）。"
+            f"「{BILL_NOT_PROVIDED_TEXT}」的分项按未知处理，不参与任何合计。"
+        ),
+    )
+    _auto_width(ws, max_width=60)
+
+
+def _sheet_load_data_quality(wb: Workbook, portrait) -> None:
+    """负荷数据质量（V2.4 §8.1；数据来自 ``LoadPortrait``，本函数不做统计）。"""
+    ws = wb.create_sheet("负荷数据质量")
+    headers = ["项目", "取值", "口径说明"]
+    source_word = (
+        "无负荷数据" if portrait is None
+        else ("估算" if portrait.estimated else "实测")
+    )
+    row = _write_title(
+        ws,
+        f"负荷数据质量（{source_word}口径；V2.2 §6.3 B、V2.4 §8.1）",
+        len(headers),
+    )
+    if portrait is None:
+        ws.cell(row=row, column=1, value=LOAD_QUALITY_EMPTY_TEXT).font = _BOLD
+        row += 1
+        for text in (LOAD_QUALITY_HOWTO, CONSUMPTION_EMPTY_NOTE):
+            ws.cell(row=row, column=1, value=text)
+            row += 1
+        _auto_width(ws, max_width=70)
+        return
+
+    source_tag = (
+        f"{CALIBER_TAG_ESTIMATED}（不是实测）" if portrait.estimated else "实测数据"
+    )
+    row = _write_header_at(ws, row, headers)
+    data: list[list] = [
+        ["数据来源", portrait.source_type.label, source_tag],
+        ["来源徽标", portrait.source_type.report_badge, f"口径：{source_tag}"],
+        ["来源标签（report）", portrait.provenance_text, "界面、Excel、PDF 同源"],
+        ["时间间隔", f"{portrait.interval_minutes} 分钟", "左闭右开 [t, t+Δt)"],
+        ["数据点数", portrait.point_count, "15 分钟整年 35040 点 / 闰年 35136 点；小时 8760 / 8784"],
+        ["时间覆盖率", portrait.coverage_ratio, "有效时段 / 完整年度时段；**不是负荷覆盖率**"],
+        ["质量等级", portrait.quality_status.label, "V2 §55 四级"],
+        ["缺失点数量", portrait.missing_value_count, "缺失点不得按 0 参与计算"],
+        ["是否已年化", "是" if portrait.annualized else "否",
+         "年化属估算口径，报告中必须标注（V2.2 §2.2）"],
+    ]
+    row = _write_rows(ws, row, data, formats={2: _NUM4})
+    row += 1
+
+    for name, value in portrait.portrait_rows():
+        ws.cell(row=row, column=1, value=name)
+        ws.cell(row=row, column=2, value=value)
+        row += 1
+    row += 1
+
+    row = _write_header_at(
+        ws,
+        row,
+        ["月份", "电量（kWh）", "最大功率（kW）", "平均功率（kW）", "负荷率", "缺失点", "口径"],
+    )
+    monthly = [
+        [
+            item.month_key,
+            item.energy_kwh,
+            item.peak_power_kw,
+            item.avg_power_kw,
+            item.load_factor,
+            item.missing_value_count,
+            source_tag,
+        ]
+        for item in portrait.monthly
+    ]
+    row = _write_rows(ws, row, monthly, formats={2: _NUM4, 3: _NUM4, 4: _NUM4, 5: _PCT})
+    if not monthly:
+        ws.cell(row=row, column=1, value="无逐月数据。")
+        row += 1
+    row += 1
+
+    row = _write_header_at(
+        ws,
+        row,
+        ["典型日类型", "采样天数", "最大功率（kW）", "间隔（分钟）", "口径"],
+    )
+    typical = [
+        [item.day_type, item.sample_days, item.peak_power_kw, item.interval_minutes, source_tag]
+        for item in portrait.typical_days
+    ]
+    row = _write_rows(ws, row, typical, formats={3: _NUM4})
+    if not typical:
+        ws.cell(row=row, column=1, value="无典型日曲线。")
+        row += 1
+    row += 1
+    ws.cell(
+        row,
+        column=1,
+        value=(
+            "口径分界：最大功率是**区间平均功率的最大值**，不是电表计费需量（V2.3 §7.5）；"
+            "负荷率 = 平均功率 ÷ 最大功率。" + ASSUMPTION_BOUNDARY
+        ),
+    )
+    _auto_width(ws, max_width=70)
+
+
+def _sheet_tariff_versions(wb: Workbook, plan_ids: list[str] | None) -> None:
+    """电价版本与来源（V2.4 §8.1；行数据来自 ``TariffService.plan_rows_for_report``）。"""
+    ws = wb.create_sheet("电价版本与来源")
+    headers = ["字段", "取值", "单位", "来源 / 口径"]
+    row = _write_title(ws, "电价版本与来源（V2.3 §7.3、§4.1；V2.4 §8.1）", len(headers))
+    ids = [plan_id for plan_id in (plan_ids or []) if plan_id][:_PLAN_ROWS_LIMIT]
+
+    if not ids:
+        summaries = _plan_summaries_for_report()
+        if not summaries:
+            ws.cell(row=row, column=1, value="当前版本库中没有可用的电价计划，本表无电价版本数据。").font = _BOLD
+            row += 1
+            for text in (TARIFF_VERSION_HOWTO, TARIFF_VERSION_NOTE):
+                ws.cell(row=row, column=1, value=text)
+                row += 1
+            _auto_width(ws, max_width=70)
+            return
+        row = _write_header_at(ws, row, headers)
+        data = [
+            [
+                str(item.get("name", "")),
+                str(item.get("status_label", item.get("status", ""))),
+                str(item.get("effective_from", "")),
+                str(item.get("source_text", item.get("source_name", ""))),
+            ]
+            for item in summaries
+        ]
+        row = _write_rows(ws, row, data)
+        row += 1
+        ws.cell(
+            row,
+            column=1,
+            value=(
+                "本表为上表「内置 / 已登记计划」的**摘要**（未指定本次测算采用哪一版）。"
+                "如需逐项列出某版本的时段电价与来源，请在界面选定电价计划后重新导出。" + TARIFF_VERSION_NOTE
+            ),
+        )
+        _auto_width(ws, max_width=70)
+        return
+
+    service = TariffService(Project())
+    for plan_id in ids:
+        try:
+            rows = service.plan_rows_for_report(plan_id)
+        except Exception as exc:
+            logger.warning("电价计划 %s 无法取出报告行：%s", plan_id, exc)
+            ws.cell(row=row, column=1, value=f"电价计划 {plan_id} 读取失败，本版本未列出。")
+            row += 1
+            continue
+        row = _write_header_at(ws, row, headers)
+        row = _write_rows(ws, row, [list(item) for item in rows], formats={2: _NUM4})
+        row += 1
+    ws.cell(row=row, column=1, value=TARIFF_VERSION_NOTE)
+    row += 1
+    ws.cell(row=row, column=1, value=ASSUMPTION_BOUNDARY)
+    _auto_width(ws, max_width=70)
+
+
+def _sheet_scenario_bill_compare(wb: Workbook, scenario_result) -> None:
+    """方案电费对比（V2.4 §8.1；行数据来自 ``ScenarioBillService``，报表层不做算术）。
+
+    注意与 V2 既有的 :func:`_sheet_scenario_compare`（工作表「方案比较」，
+    ``CalculationResult.scenario_results`` 的容量扫描结果）**不是同一张表**：
+    本表是 V2.3 §7.1 的四场景**账单**对比（无光伏 / 仅光伏 / 仅储能 / 光储）。
+    """
+    ws = wb.create_sheet("方案电费对比")
+    row = _write_title(
+        ws,
+        f"方案电费对比（口径：{CALIBER_TAG_SIMULATED}；V2.3 §7.1、§7.6、V2.4 §8.1）",
+        24,
+    )
+    if scenario_result is None:
+        ws.cell(row=row, column=1, value=SCENARIO_COMPARE_EMPTY_TEXT).font = _BOLD
+        row += 1
+        for text in (SCENARIO_COMPARE_HOWTO, SCENARIO_COMPARE_BOUNDARY):
+            ws.cell(row=row, column=1, value=text)
+            row += 1
+        _auto_width(ws, max_width=70)
+        return
+
+    head = [
+        ["—— 本次模拟的负荷与电价口径 ——", "", ""],
+        ["电价计划编号", scenario_result.tariff_plan_id, "V2.3 §7.3"],
+        ["电价计划名称（含版本）", scenario_result.tariff_plan_name, "V2.3 §4.1"],
+        ["电价来源与文号", scenario_result.tariff_plan_source or "未提供", "V2.3 §4.3"],
+        ["电价核验状态", scenario_result.tariff_plan_status or "未提供", "draft / verified / expired"],
+        ["负荷数据来源", scenario_result.load_source or "未提供",
+         "实测" if scenario_result.load_is_measured else f"{CALIBER_TAG_ESTIMATED}（不是实测）"],
+        ["时间间隔 / 数据点数", f"{scenario_result.interval_minutes} 分钟 / {scenario_result.point_count} 点",
+         "四场景必须共用同一时间轴"],
+        ["基准年", scenario_result.base_year, "V2 §7"],
+        ["唯一运营收益取自场景", scenario_result.reference_scenario.label, "V2.3 §7.6 第 5 条"],
+        ["收益去重校验", "通过" if scenario_result.dedup_verified else "未通过",
+         f"恒等式最大偏差 {scenario_result.identity_max_deviation_yuan:.6f} 元"],
+        ["唯一去重后的年度运营收益（元）", scenario_result.unique_annual_benefit_yuan,
+         "送财务引擎的唯一数值（V2.3 §3.5）"],
+    ]
+    row = _write_rows(ws, row, head, formats={2: _NUM4})
+    row += 1
+
+    row = _write_header_at(ws, row, ["—— 四场景年度账单（方案模拟 ④）——", "", "", ""])
+    for table_rows in (
+        ScenarioBillService.scenario_rows(scenario_result),
+        ScenarioBillService.comparison_rows(scenario_result),
+        ScenarioBillService.dedup_rows(scenario_result),
+    ):
+        header, *body = table_rows
+        row = _write_header_at(ws, row, [str(cell) for cell in header])
+        row = _write_rows(ws, row, [list(line) for line in body])
+        row += 1
+
+    manifest = getattr(scenario_result, "dedup", None)
+    if manifest is not None:
+        rows = ScenarioBillService.dedup_manifest_rows(manifest)
+        header, *body = rows
+        row = _write_header_at(ws, row, [str(cell) for cell in header])
+        row = _write_rows(ws, row, [list(line) for line in body])
+        row += 1
+
+    row = _write_header_at(ws, row, ["—— 关键假设与警告（逐条披露，V2.3 §7.7）——", "", ""])
+    for text in (*scenario_result.warnings, *scenario_result.assumptions, *scenario_result.messages):
+        ws.cell(row=row, column=1, value=text)
+        row += 1
+    if not (scenario_result.warnings or scenario_result.assumptions or scenario_result.messages):
+        ws.cell(row=row, column=1, value="无。")
+        row += 1
+    row += 1
+    ws.cell(row=row, column=1, value=SCENARIO_COMPARE_BOUNDARY)
+    _auto_width(ws, max_width=70)
+
+
+def _sheet_assumptions_warnings(
+    wb: Workbook,
+    project: Project,
+    result: CalculationResult,
+    portrait,
+    self_consumption,
+    scenario_result,
+    as_of: datetime,
+) -> None:
+    """计算假设与警告（V2.4 §8.1；同时披露数据来源、模型版本与四类口径分界）。"""
+    ws = wb.create_sheet("计算假设与警告")
+    row = _write_title(ws, "计算假设与警告（V2.4 §8.1；V2 §55、V2.1 §3.1、V2.3 §7.6）", 4)
+    row = _write_header_at(ws, row, ["项目", "取值", "口径/来源", "—"])
+
+    rows: list[list] = [
+        ["—— 报告与模型版本（§8.4 结果页要求）——", "", "", ""],
+        ["项目名称", project.basic_info.project_name, "用户输入", ""],
+        ["项目文件 schema 版本", project.schema_version, f"当前软件 {CURRENT_SCHEMA_VERSION}", ""],
+        ["计算引擎版本", CALCULATION_ENGINE_VERSION, "V2 §94", ""],
+        ["账单段版本", BILL_SECTION_SCHEMA_VERSION, "V2.1 §8.2", ""],
+        ["政策版本", project.policy.display_version if project.policy is not None else "未关联政策模板",
+         "V2 §95", ""],
+        ["报告生成时间", as_of.isoformat(timespec="seconds"), "导出时刻", ""],
+        ["时序仿真", "已启用" if project.timeseries.enabled else "未启用（V1 年度模式）", "V2 §1.1", ""],
+    ]
+    row = _write_rows(ws, row, rows)
+    row += 1
+
+    rows = [["—— 四类数据口径分界（§8.1：不得混为一谈）——", "", "", ""]]
+    rows.extend([[name, text, "规格书 §8.1", ""] for name, text in CALIBER_LEGEND])
+    row = _write_rows(ws, row, rows)
+    row += 1
+
+    bills = sorted(project.bills, key=_bill_sort_key)
+    assumptions = [
+        key for key, meta in result.parameter_sources.items() if meta.get("is_assumption")
+    ]
+    rows = [
+        ["—— 输入数据来源与质量等级 ——", "", "", ""],
+        ["账单条数", f"{len(bills)} 条", CALIBER_TAG_ACTUAL, ""],
+        ["账单含未提供字段的条数",
+         sum(1 for bill in bills if bill.quality_messages),
+         "账单未提供的字段按未知处理，不按 0（V2.1 §2.1）", ""],
+        ["负荷数据集数量", len(project.load_datasets), f"当前激活：{project.active_load_dataset_id or '未选择'}", ""],
+        ["负荷数据质量等级",
+         portrait.quality_status.label if portrait is not None else "无负荷数据（空状态）",
+         (f"{CALIBER_TAG_ESTIMATED}（不是实测）" if portrait is not None and portrait.estimated
+          else ("实测" if portrait is not None else "—")), ""],
+        ["时间覆盖率（≠负荷覆盖率）",
+         portrait.coverage_ratio if portrait is not None else "",
+         "V2.2 §6.4", ""],
+        ["消纳分析结果",
+         "不适用" if self_consumption is None else self_consumption.load_source_type.label,
+         "尚未执行消纳分析" if self_consumption is None else CALIBER_TAG_ESTIMATED
+         if self_consumption.is_based_on_estimate else "实测", ""],
+        ["时序数据质量评分",
+         result.data_quality.score if result.data_quality is not None else "不适用",
+         result.data_quality.level_label if result.data_quality is not None else "未导入外部时序数据", ""],
+        ["登记参数总数 / 其中假设值", f"{len(result.parameter_sources)} / {len(assumptions)}",
+         "假设值不得视为正式事实（V2 §83）", ""],
+    ]
+    row = _write_rows(ws, row, rows, formats={2: _NUM4})
+    row += 1
+
+    row = _write_header_at(ws, row, ["—— 假设值清单（parameter_sources.is_assumption）——", "", "", ""])
+    row = _write_rows(
+        ws,
+        row,
+        [[key, str(result.parameter_sources[key].get("value", "")),
+          str(result.parameter_sources[key].get("source_type_label", "")),
+          str(result.parameter_sources[key].get("note", ""))] for key in assumptions],
+    )
+    if not assumptions:
+        ws.cell(row=row, column=1, value="无标记为假设值的参数。")
+        row += 1
+    row += 1
+
+    row = _write_header_at(ws, row, ["—— 引擎口径说明（result.notes）——", "", "", ""])
+    for note in result.notes:
+        ws.cell(row=row, column=1, value=note)
+        row += 1
+    if not result.notes:
+        ws.cell(row=row, column=1, value=ASSUMPTION_EMPTY_NOTE)
+        row += 1
+    row += 1
+
+    row = _write_header_at(ws, row, ["级别", "类别", "问题描述", "数量/示例"])
+    quality_issues = result.data_quality.issues if result.data_quality is not None else []
+    row = _write_rows(
+        ws,
+        row,
+        [[item.level, item.category, item.message, item.count] for item in quality_issues],
+        formats={4: _MONEY0},
+    )
+    if not quality_issues:
+        ws.cell(row=row, column=1, value="时序数据质量未发现问题（或未导入外部时序数据）。")
+        row += 1
+    row += 1
+
+    row = _write_header_at(ws, row, ["—— 方案模拟警告与假设（V2.3 §7.7）——", "", "", ""])
+    scenario_lines = (
+        [*scenario_result.warnings, *scenario_result.assumptions]
+        if scenario_result is not None
+        else []
+    )
+    for text in scenario_lines:
+        ws.cell(row=row, column=1, value=text)
+        row += 1
+    if not scenario_lines:
+        ws.cell(
+            row,
+            column=1,
+            value=f"{SCENARIO_COMPARE_EMPTY_TEXT}{SCENARIO_COMPARE_HOWTO}",
+        )
+        row += 1
+    row += 1
+    ws.cell(row=row, column=1, value=ASSUMPTION_BOUNDARY)
+    _auto_width(ws, max_width=70)
+
+
+# --------------------------------------------------------------------------- #
 # 对外接口
 # --------------------------------------------------------------------------- #
 class ExcelExporter:
@@ -1513,6 +2077,9 @@ class ExcelExporter:
         *,
         self_consumption=None,
         load_portrait=None,
+        plan_ids: list[str] | None = None,
+        scenario_result=None,
+        as_of: datetime | None = None,
     ) -> Path:
         """导出 Excel；返回实际写入路径。
 
@@ -1522,11 +2089,20 @@ class ExcelExporter:
         ``self_consumption``（``SelfConsumptionResult``）与 ``load_portrait``（``LoadPortrait``）
         为 V2.2 阶段 4 追加的**可选**参数；既有调用方不传时「消纳率分析」表输出
         "尚未执行负荷与消纳分析"的中文说明，**不缺表、不报错、不臆造数值**。
+
+        V2.4 阶段 7 再追加三个**可选**参数（既有调用方不传时行为不变）：
+
+        :param plan_ids: 本次测算采用的电价计划编号列表（供「电价版本与来源」表；
+            不传时该表列出电价版本库中已登记计划的摘要）。
+        :param scenario_result: 四场景对比总结果 ``ScenarioBillSet``（供「方案电费对比」表；
+            不传时该表输出"尚未执行光储四场景账单对比"及操作路径）。
+        :param as_of: 报告生成时间（供「计算假设与警告」表；默认取当前时间）。
         """
         target = Path(path)
         if target.suffix.lower() != ".xlsx":
             target = target.with_name(target.name + ".xlsx")
         target.parent.mkdir(parents=True, exist_ok=True)
+        generated_at = as_of or datetime.now()
 
         wb = Workbook()
         wb.remove(wb.active)  # 去掉默认空表，保证工作表数量与规范一致
@@ -1560,6 +2136,14 @@ class ExcelExporter:
         _sheet_self_consumption(wb, self_consumption, load_portrait)
         _sheet_policy(wb, project, result)
         _sheet_sources(wb, project, result)
+        # —— V2.4 §8.1（阶段 7）：5 张新增表（无数据时输出说明，不缺表、不报错）——
+        _sheet_monthly_bill_analysis(wb, project, result)
+        _sheet_load_data_quality(wb, load_portrait)
+        _sheet_tariff_versions(wb, plan_ids)
+        _sheet_scenario_bill_compare(wb, scenario_result)
+        _sheet_assumptions_warnings(
+            wb, project, result, load_portrait, self_consumption, scenario_result, generated_at
+        )
 
         if wb.sheetnames != SHEET_NAMES:  # pragma: no cover - 结构性自检
             raise RuntimeError(

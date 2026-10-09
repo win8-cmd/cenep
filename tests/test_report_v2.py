@@ -1,9 +1,12 @@
-"""V2 报表升级测试（V2 §66、§67、§105、§108；V2.1 §8.1）。
+"""V2 报表升级测试（V2 §66、§67、§105、§108；V2.1 §8.1；V2.2 §6.3；V2.4 §8.1）。
 
 覆盖三件事：
 
-1. **Excel 表清单**（§67 + V2.1 §8.1）：V1 的 13 张全部保留 + V2 新增 11 张 + V2.1 新增 2 张 = 26 张，顺序固定；
-2. **PDF 章节**（§66 + V2.1 §8.1）：17 部分，含 6 个时序章节、1 个账单章节与 3 张图表；
+1. **Excel 表清单**（§67 + V2.1 §8.1 + V2.2 §6.3 + V2.4 §8.1）：
+   V1 的 13 张全部保留 + V2 新增 11 张 + V2.1 新增 2 张 + V2.2 新增 1 张
+   + V2.4 新增 5 张，顺序固定；表数**一律引用 ``len(SHEET_NAMES)``**，不硬编码；
+2. **PDF 章节**（§66 + V2.1 §8.1 + V2.2 §6.3 + V2.4 §8.1）：含 6 个时序章节、账单与校准章节、
+   负荷与消纳章节、质量等级章节与 3 张图表；章节号由 ``section_title`` 生成，不硬编码；
 3. **结果一致性**（§105）：Excel / PDF 展示的数字必须来自同一个 ``CalculationResult``，
    且两者都包含 V2 新增的关键指标。
 """
@@ -27,6 +30,7 @@ from cenep.reports.pdf_exporter import (
     PdfExporter,
     _styles,
     register_cjk_font,
+    section_title,
 )
 
 pytest.importorskip("test_v2_integration", reason="需要 V2 Golden Case 构造器")
@@ -38,12 +42,19 @@ V2_SHEETS = (
 )
 #: V2.1 §8.1（阶段 2）新增的两张账单表
 V21_SHEETS = ("账单原始数据", "账单校验")
+#: V2.4 §8.1（阶段 7）新增的五张表
+V24_SHEETS = ("月度电费分析", "负荷数据质量", "电价版本与来源", "方案电费对比", "计算假设与警告")
 V1_SHEETS = (
     "项目概况", "基础参数", "技术参数", "电价参数", "投资参数", "运维参数",
     "融资参数", "年度现金流", "财务指标", "敏感性分析", "情景分析",
     "政策依据", "参数来源",
 )
 V2_PDF_SECTIONS = ("负荷分析", "PV时序分析", "储能SOC分析", "能源流", "电费分析", "储能收益")
+#: V2.4 §8.1 新增的 6 个章节
+V24_PDF_SECTIONS = (
+    "数据来源与质量等级", "基准账单校准", "月度电费分析",
+    "方案前后电费差额", "经济性指标与风险提示", "关键假设、未建模项与免责声明",
+)
 
 
 def _service() -> CalculationService:
@@ -96,9 +107,14 @@ def _collect_text(flowables) -> str:
 # 任务 A：Excel（V2 §67）
 # --------------------------------------------------------------------------- #
 class TestExcelSheetSet:
-    def test_sheet_names_are_twenty_seven(self):
-        """V2.1 §8.1：V2 的 24 张 + 账单两张 = 26 张；V2.2 §6.3 再加「消纳率分析」= 27 张。"""
-        assert len(SHEET_NAMES) == 27
+    def test_sheet_count_follows_declaration(self):
+        """V2.4 §8.1：表数**不得硬编码**，一律引用 ``SHEET_NAMES``。
+
+        历史：V2 的 24 张 + V2.1 账单 2 张 = 26；V2.2 §6.3 加「消纳率分析」= 27；
+        V2.4 §8.1 再加 5 张 = 32。
+        """
+        assert len(SHEET_NAMES) == 32
+        assert list(SHEET_NAMES[-len(V24_SHEETS):]) == list(V24_SHEETS)
 
     def test_v2_case_sheet_order(self, v2_case, tmp_path):
         project, result = v2_case
@@ -106,7 +122,7 @@ class TestExcelSheetSet:
         assert wb.sheetnames == SHEET_NAMES
 
     def test_v1_case_sheet_order(self, v1_case, tmp_path):
-        """V1 项目也必须有全部 27 张表（新增表输出占位说明）。"""
+        """V1 项目也必须生成全部工作表（新增表输出占位说明）。"""
         project, result = v1_case
         wb = _export_excel(project, result, tmp_path / "v1.xlsx")
         assert wb.sheetnames == SHEET_NAMES
@@ -114,7 +130,7 @@ class TestExcelSheetSet:
     def test_all_required_sheets_present(self, v2_case, tmp_path):
         project, result = v2_case
         names = set(_export_excel(project, result, tmp_path / "v2.xlsx").sheetnames)
-        for name in (*V1_SHEETS, *V2_SHEETS, *V21_SHEETS):
+        for name in (*V1_SHEETS, *V2_SHEETS, *V21_SHEETS, *V24_SHEETS):
             assert name in names, f"缺少工作表：{name}"
 
     @pytest.mark.parametrize("sheet", V21_SHEETS)
@@ -126,6 +142,28 @@ class TestExcelSheetSet:
         assert text.strip(), f"{sheet} 内容为空"
         assert "本项目尚未录入电费账单" in text
         assert "导入" in text and "录入方法" in text
+
+    @pytest.mark.parametrize("sheet", V24_SHEETS)
+    def test_v24_sheets_never_missing(self, v1_case, tmp_path, sheet):
+        """V2.4 §8.1/§8.2：5 张新表在 V1 项目（无账单、无负荷、无场景）下也必须存在且有说明。"""
+        project, result = v1_case
+        wb = _export_excel(project, result, tmp_path / "v1.xlsx")
+        text = _sheet_text(wb[sheet])
+        assert text.strip(), f"{sheet} 内容为空"
+        assert any(
+            key in text
+            for key in ("尚未录入电费账单", "尚未导入或估算", "没有可用的电价计划", "尚未执行光储四场景",
+                        "内置 / 已登记计划")
+        ), f"{sheet} 缺少占位说明"
+
+    def test_v24_sheets_are_appended_after_disclaimer_related_sheets(self, v1_case, tmp_path):
+        """V2.4 表是**追加式**扩展：既有表的相对顺序一字未动（V1 §108 兼容承诺）。"""
+        project, result = v1_case
+        names = _export_excel(project, result, tmp_path / "v1.xlsx").sheetnames
+        base = list(SHEET_NAMES[: len(SHEET_NAMES) - len(V24_SHEETS)])
+        assert names[: len(base)] == base
+        for legacy in ("政策依据", "参数来源", "账单原始数据", "消纳率分析"):
+            assert base.index(legacy) < len(base)
 
     @pytest.mark.parametrize(
         "sheet",
@@ -246,24 +284,31 @@ class TestPdfSections:
         project, result = v1_case
         story = PdfExporter().build_story(project, result, _styles(register_cjk_font()))
         text = _collect_text(story)
-        for section in REPORT_SECTIONS:
-            assert section in text, f"V1 报告缺少章节：{section}"
+        for name in REPORT_SECTIONS:
+            assert name in text, f"V1 报告缺少章节：{name}"
 
     def test_section_order_follows_spec(self, v2_case):
-        """§66：章节必须按规范顺序出现。"""
+        """§66 + V2.4 §8.1：章节必须按 ``REPORT_SECTIONS`` 的顺序出现（序号由 section_title 生成）。"""
         project, result = v2_case
         text = _collect_text(
             PdfExporter().build_story(project, result, _styles(register_cjk_font()))
         )
-        numbers = ("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、",
-                   "九、", "十、", "十一、", "十二、", "十三、", "十四、", "十五、", "十六、",
-                   "十七、")
         positions = []
-        for prefix in numbers:
-            idx = text.find(prefix)
-            assert idx >= 0, f"未找到章节序号 {prefix}"
+        for index in range(len(REPORT_SECTIONS)):
+            title = section_title(index)
+            idx = text.find(title)
+            assert idx >= 0, f"未找到章节 {title}"
             positions.append(idx)
-        assert positions == sorted(positions), "章节顺序与 V2 §66 不一致"
+        assert positions == sorted(positions), "章节顺序与 REPORT_SECTIONS 不一致"
+
+    def test_v24_section_titles_are_the_declared_ones(self, v2_case):
+        project, result = v2_case
+        text = _collect_text(
+            PdfExporter().build_story(project, result, _styles(register_cjk_font()))
+        )
+        for name in V24_PDF_SECTIONS:
+            index = REPORT_SECTIONS.index(name)
+            assert section_title(index) in text
 
     def test_v1_project_notes_timeseries_disabled(self, v1_case):
         project, result = v1_case
@@ -287,13 +332,17 @@ class TestPdfCharts:
         current = ""
         placed: dict[str, int] = {}
         for item in story:
-            if isinstance(item, Paragraph) and item.text[:1] in "一二三四五六七八九十":
+            if isinstance(item, Paragraph) and item.text in {
+                section_title(index) for index in range(len(REPORT_SECTIONS))
+            }:
                 current = item.text
             elif isinstance(item, Drawing):
                 placed[current] = placed.get(current, 0) + 1
-        # V2.1 §8.1 插入账单章节、V2.2 §6.3 插入负荷估算与消纳章节，时序章节整体顺延两位
-        for section in ("四、负荷分析", "六、PV时序分析", "七、储能SOC分析"):
-            assert placed.get(section, 0) >= 1, f"{section} 缺少图表"
+        # V2.1 §8.1 插入账单章节、V2.2 §6.3 插入负荷估算与消纳章节、V2.4 §8.1 再插入 6 章，
+        # 时序章节整体顺延；这里按声明顺序取章节标题，不硬编码中文序号。
+        for name in ("负荷分析", "PV时序分析", "储能SOC分析"):
+            title = section_title(REPORT_SECTIONS.index(name))
+            assert placed.get(title, 0) >= 1, f"{title} 缺少图表"
 
     def test_no_charts_when_timeseries_disabled(self, v1_case):
         project, result = v1_case

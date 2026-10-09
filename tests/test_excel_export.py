@@ -11,7 +11,19 @@ import pytest
 from openpyxl import load_workbook
 
 from cenep.calculation.engine import calculation_engine
-from cenep.reports.excel_exporter import SHEET_NAMES, ExcelExporter
+from cenep.reports.excel_exporter import (
+    CALIBER_TAG_ACTUAL,
+    CALIBER_TAG_ESTIMATED,
+    CALIBER_TAG_RECOMPUTED,
+    CALIBER_TAG_SIMULATED,
+    SHEET_NAMES,
+    ExcelExporter,
+)
+
+#: V2.4 §8.1（阶段 7）新增的 5 张表（**追加**在既有 27 张之后）
+V24_SHEETS = ("月度电费分析", "负荷数据质量", "电价版本与来源", "方案电费对比", "计算假设与警告")
+#: V2.4 之前就存在的表清单 = 完整清单去掉追加的 5 张（用来断言"只是追加"）
+V1_V24_BASE = list(SHEET_NAMES[: len(SHEET_NAMES) - len(V24_SHEETS)])
 
 
 @pytest.fixture
@@ -41,17 +53,20 @@ class TestWorkbookStructure:
         assert path.exists()
 
     def test_sheets_match_names_and_count(self, exported):
-        """V2 §67 + V2.1 §8.1 + V2.2 §6.3：V1 §108 的 13 张 + V2 新增 11 张时序表
-        + V2.1 新增 2 张账单表 + V2.2 阶段 4 新增 1 张「消纳率分析」= 27 张。
+        """V2 §67 + V2.1 §8.1 + V2.2 §6.3 + V2.4 §8.1：V1 §108 的 13 张 + V2 新增 11 张时序表
+        + V2.1 新增 2 张账单表 + V2.2 阶段 4 新增 1 张「消纳率分析」
+        + V2.4 阶段 7 新增 5 张 = 32 张。
 
-        这是 V2 §67「至少包含」、V2.1 §8.1 与 V2.2 §6.3 对 V1 §108 的**正当超集扩展**：
-        V1 的 13 张全部保留且相对顺序不变，新增表在无对应数据时输出中文说明，
+        **表数一律取自 :data:`SHEET_NAMES` 的长度**，不再硬编码数字（V2.4 §8.1）。
+
+        这是 V2 §67「至少包含」、V2.1 §8.1、V2.2 §6.3 与 V2.4 §8.1 对 V1 §108 的
+        **正当超集扩展**：V1 的 13 张全部保留且相对顺序不变，新增表在无对应数据时输出中文说明，
         因此 V1 项目、无账单项目与无负荷项目仍可正常导出（见 test_v1_project_still_exports）。
         """
         _, _, path = exported
         wb = load_workbook(path)
         assert wb.sheetnames == SHEET_NAMES
-        assert len(wb.sheetnames) == 27
+        assert len(wb.sheetnames) == len(SHEET_NAMES)
 
     def test_v22_self_consumption_sheet_included(self, exported):
         """V2.2 §6.3 C：消纳率分析表必须存在；未执行消纳分析时输出中文说明。"""
@@ -89,6 +104,56 @@ class TestWorkbookStructure:
             "政策依据", "参数来源",
         ):
             assert legacy in names, f"V1 表被破坏：{legacy}"
+
+    def test_v24_new_sheets_included(self, exported):
+        """V2.4 §8.1（阶段 7）：5 张新增表必须存在；无数据时输出中文说明而非缺表。"""
+        _, _, path = exported
+        wb = load_workbook(path)
+        names = set(wb.sheetnames)
+        for required in V24_SHEETS:
+            assert required in names, f"缺少 V2.4 §8.1 要求的表：{required}"
+        for required in ("月度电费分析", "负荷数据质量", "方案电费对比"):
+            text = "\n".join(
+                str(c.value) for row in wb[required].iter_rows() for c in row if c.value is not None
+            )
+            assert text.strip(), f"{required} 内容为空"
+
+    def test_v24_new_sheets_keep_v1_order(self, exported):
+        """V2.4 的新表是**追加**的：既有 27 张表的相对顺序与表名一字未动。"""
+        _, _, path = exported
+        names = load_workbook(path).sheetnames
+        assert names[: len(V1_V24_BASE)] == V1_V24_BASE
+        assert names[len(V1_V24_BASE):] == list(V24_SHEETS)
+
+    def test_v24_new_sheets_have_no_formula(self, exported):
+        """§109 / V2 §61：新增表同样不得写公式。"""
+        _, _, path = exported
+        wb = load_workbook(path)
+        offenders = [
+            f"{ws.title}!{cell.coordinate}"
+            for ws in wb.worksheets
+            if ws.title in V24_SHEETS
+            for row in ws.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str) and cell.value.startswith("=")
+        ]
+        assert offenders == []
+
+    def test_v24_scenario_compare_placeholder_explains_how_to(self, exported):
+        """无场景结果时，「方案电费对比」必须写明操作路径（不缺表、不臆造数值）。"""
+        _, _, path = exported
+        ws = load_workbook(path, data_only=True)["方案电费对比"]
+        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value is not None)
+        assert "尚未执行光储四场景账单对比" in text
+        assert "执行四场景对比" in text
+
+    def test_v24_caliber_legend_lists_four_data_types(self, exported):
+        """§8.1：实际账单 / 软件复算 / 模型估算 / 方案模拟四类口径必须逐条说明。"""
+        _, _, path = exported
+        ws = load_workbook(path, data_only=True)["计算假设与警告"]
+        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value is not None)
+        for label in CALIBER_TAG_ACTUAL, CALIBER_TAG_RECOMPUTED, CALIBER_TAG_ESTIMATED, CALIBER_TAG_SIMULATED:
+            assert label in text, f"计算假设与警告缺少口径标签：{label}"
 
     def test_declared_sheet_names_match_actual(self, exported):
         _, result, path = exported

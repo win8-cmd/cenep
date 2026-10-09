@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "stage": "done",
+  "checks": [
+    "工商业光伏：计算 + Excel + PDF 全部通过",
+    "工商业储能：计算 + Excel + PDF 全部通过",
+    "工商业光储：计算 + Excel + PDF 全部通过"
+  ],
+  "projects": [
+    {
+      "type": "COMMERCIAL_PV",
+      "label": "工商业光伏",
+      "total_capex": 3000000.0,
+      "project_irr": 0.15577722059909632,
+      "project_npv": 2034789.973981416,
+      "static_payback": 6.1014647229716505,
+      "lcoe": 0.35131245094782904,
+      "lcos": null,
+      "excel_sheets": 24,
+      "pdf_bytes": 214792
+    },
+    {
+      "type": "COMMERCIAL_STORAGE",
+      "label": "工商业储能",
+      "total_capex": 1000000.0,
+      "project_irr": -0.06741708881488453,
+      "project_npv": -796944.1222948736,
+      "static_payback": null,
+      "lcoe": null,
+      "lcos": 0.4776404621639379,
+      "excel_sheets": 24,
+      "pdf_bytes": 214210
+    },
+    {
+      "type": "PV_STORAGE",
+      "label": "工商业光储",
+      "total_capex": 4000000.0,
+      "project_irr": 0.10528577420390703,
+      "project_npv": 853230.067737111,
+      "static_payback": 8.441244153366823,
+      "lcoe": 0.3560466564119183,
+      "lcos": 0.4776404621639379,
+      "excel_sheets": 24,
+      "pdf_bytes": 215610
+    }
+  ],
+  "errors": []
+}

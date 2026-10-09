@@ -1,0 +1,110 @@
+﻿single_year_8760_hourly_simulation: 0.050032 s
+consumption_35040_points_15min: 0.017262 s
+single_year_35040_15min_simulation: 0.203020 s
+four_scenario_bill_compare_8760: 0.367249 s
+bill_recompute_and_calibrate_12_bills: 0.289722 s
+tariff_plan_period_detection: 0.068071 s
+big_project_save_35040_plus_12_bills: 0.945341 s
+big_project_load: 0.667753 s
+big_project_excel_export: 0.628937 s
+big_project_pdf_export: 0.519819 s
+full_period_25_year_simulation: 1.309945 s
+{
+  "environment": {
+    "python": "3.12.14",
+    "platform": "win32",
+    "impl": "CPython"
+  },
+  "axis_hourly_points": 8760,
+  "single_year_8760_hourly_simulation": {
+    "seconds": 0.050032,
+    "repeat": 3
+  },
+  "single_year_8760_points": 8760,
+  "axis_15min_points": 35040,
+  "consumption_35040_points_15min": {
+    "seconds": 0.017262,
+    "repeat": 3
+  },
+  "consumption_self_consumption_rate": 0.8141791670837731,
+  "consumption_max_balance_error_kwh": 0.0,
+  "single_year_35040_15min_simulation": {
+    "seconds": 0.20302,
+    "repeat": 2
+  },
+  "single_year_35040_points": 35040,
+  "four_scenario_bill_compare_8760": {
+    "seconds": 0.367249,
+    "repeat": 2
+  },
+  "four_scenario_unique_benefit_yuan": 669196.1049090121,
+  "four_scenario_dedup_verified": true,
+  "bill_count": 12,
+  "bill_recompute_and_calibrate_12_bills": {
+    "seconds": 0.289722,
+    "repeat": 3
+  },
+  "calibration_bills": 12,
+  "calibration_passed": false,
+  "tariff_plan_period_detection": {
+    "seconds": 0.068071,
+    "repeat": 5
+  },
+  "tariff_plan_has_error": false,
+  "tariff_plan_issue_count": 1,
+  "tariff_plan_period_prices": {
+    "FLAT": 0.613986,
+    "VALLEY": 0.395024,
+    "PEAK": 0.809061,
+    "SHARP_PEAK": 1.012099
+  },
+  "tariff_plan_period_hours": {
+    "其他月份（1-6、9-12 月）": {
+      "VALLEY": 8.0,
+      "FLAT": 8.0,
+      "PEAK": 6.0,
+      "SHARP_PEAK": 2.0
+    },
+    "7-8月": {
+      "VALLEY": 8.0,
+      "FLAT": 8.0,
+      "PEAK": 6.0,
+      "SHARP_PEAK": 2.0
+    }
+  },
+  "big_project_datasets": 1,
+  "big_project_points": 35040,
+  "big_project_save_35040_plus_12_bills": {
+    "seconds": 0.945341,
+    "repeat": 3
+  },
+  "big_project_file_bytes": 14535656,
+  "big_project_file_mb": 13.862,
+  "big_project_load": {
+    "seconds": 0.667753,
+    "repeat": 3
+  },
+  "big_project_loaded_points": 35040,
+  "big_project_loaded_bills": 12,
+  "big_project_excel_export": {
+    "seconds": 0.628937,
+    "repeat": 1
+  },
+  "big_project_excel_bytes": 52095,
+  "big_project_excel_sheets": 32,
+  "big_project_pdf_export": {
+    "seconds": 0.519819,
+    "repeat": 1
+  },
+  "big_project_pdf_bytes": 294824,
+  "full_period_25_year_simulation": {
+    "seconds": 1.309945,
+    "repeat": 1
+  },
+  "projected_100_candidates_seconds": 5.003,
+  "budgets": {
+    "single_year_8760_budget_s": 2.0,
+    "consumption_35040_budget_s": 5.0,
+    "scan_100_candidates_budget_s": 30.0
+  }
+}

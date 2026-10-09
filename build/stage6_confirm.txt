@@ -1,0 +1,2784 @@
+﻿........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 17%]
+................................F................FFFFF.................. [ 21%]
+........................................................................ [ 25%]
+........................................................................ [ 30%]
+..................................................F..................... [ 34%]
+........................................................................ [ 38%]
+........................................................................ [ 42%]
+........................................................................ [ 47%]
+........................................................................ [ 51%]
+........................................................................ [ 55%]
+.....E..EFE............................................................. [ 60%]
+............FF..FEFFEE.FF..FFFFF........................................ [ 64%]
+........................................................................ [ 68%]
+.......................................F..............................FF [ 73%]
+FFFFFF..FF.............................................................. [ 77%]
+........................................................................ [ 81%]
+.................................................FFF.................... [ 85%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+....................                                                     [100%]
+=================================== ERRORS ====================================
+_ ERROR at setup of TestExcelSelfConsumptionSheet.test_values_and_calibers_written _
+
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_values_and_calibers_writt0')
+
+    # --------------------------------------------------------------------------- #
+    @pytest.fixture
+    def exported_with_analysis(tmp_path):
+        """����һ����ʵ��"���㸺�� �� ���ɷ���"����������� Excel/PDF��"""
+        from cenep.application.load_profile_service import LoadProfileService
+        from cenep.domain.enums import ProjectType
+        from cenep.domain.load_estimate import LoadEstimateParams, MonthlyLoadEnergy
+        from cenep.domain.models import BasicInfo, Project, PVConfig
+    
+        project = Project(
+            basic_info=BasicInfo(
+                project_name="�������ɲ���", province="����", project_type=ProjectType.COMMERCIAL_PV
+            ),
+            pv=PVConfig(
+                pv_capacity_kwp=1000.0,
+                equivalent_hours=1100.0,
+                performance_ratio=1.0,
+                annual_degradation_rate=0.0,
+            ),
+        )
+        service = LoadProfileService(project, project_id="RPT")
+        monthly = [MonthlyLoadEnergy(year=2025, month=m, energy_kwh=100_000.0) for m in range(1, 13)]
+        service.estimate_load(
+            LoadEstimateParams(year=2025, interval_minutes=60, template_id="double_shift"),
+            monthly=monthly,
+        )
+        consumption = service.analyze()
+        portrait = service.portrait()
+        result = calculation_engine.calculate(project)
+        excel = ExcelExporter().export(
+            project, result, tmp_path / "����.xlsx", self_consumption=consumption, load_portrait=portrait
+>       )
+
+tests\test_load_ui_report.py:417: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0CA4BDC40>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�������ɲ���', province='����', city='', ..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�������ɲ���', project_type='COMMERCIAL_PV', province='����', city='', pv_capacity_kwp=1000.0,...Wh��������� 0.000000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = SelfConsumptionResult(load_energy_kwh=1200000.0, pv_generation_kwh=1100000.0, pv_used_on_site_kwh=729753.4431281213, p...����ʵ�⣩', pv_provenance_text='���ЧСʱ��V1 �ھ���������/ģ�����������ʵ�⣩������ 1000 kWp����ЧСʱ 1100 h�����ܱ� 1.0000', pv_source_is_estimate=True)
+load_portrait = LoadPortrait(profile_id='2025�����˵�����_double_shift@60min', name='2025 �����˵����㸺�ɣ�ģ�壺˫��������60 ���ӣ�', source_type=<LoadDataSou...44.83133184478888, 128.27917963395632, 103.4509513177062, 86.89879910687341, 72.41566592239444), interval_minutes=60)])
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+---------------------------- Captured stderr setup ----------------------------
+2026-10-10 02:13:10 | INFO    | cenep.calculation.load_estimate | ���˵�������ɣ�ģ��=double_shift�����=60 ���ӡ�8760 �㣻�����µ����ϼ� 1200000.000 kWh������ϼ� 1200000.000 kWh������²в� 0.000e+00 kWh�������߱��=�������ݣ�����ʵ�⣩
+2026-10-10 02:13:10 | INFO    | cenep.application.load_profile_service | �ǼǸ������ݼ���2025�����˵�����_double_shift@60min����Դ=���˵����㸺�ɡ�����=True������=True��
+2026-10-10 02:13:10 | INFO    | cenep.calculation.self_consumption | ���ɷ�����ɣ�8760 �㣨60 ���ӣ���������=66.3412%���ھ����Է����á¹���������������ɸ�����=60.8128%���ھ����Է����á¸��ɵ�������������=33.6588%������������=39.1872%����Դ=���˵����㸺��
+2026-10-10 02:13:14 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:13:15 | INFO    | cenep | ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_values_and_calibers_writt0\����.xlsx��32 �Ź������
+----------------------------- Captured log setup ------------------------------
+INFO     cenep.calculation.load_estimate:load_estimate.py:547 ���˵�������ɣ�ģ��=double_shift�����=60 ���ӡ�8760 �㣻�����µ����ϼ� 1200000.000 kWh������ϼ� 1200000.000 kWh������²в� 0.000e+00 kWh�������߱��=�������ݣ�����ʵ�⣩
+INFO     cenep.application.load_profile_service:load_profile_service.py:188 �ǼǸ������ݼ���2025�����˵�����_double_shift@60min����Դ=���˵����㸺�ɡ�����=True������=True��
+INFO     cenep.calculation.self_consumption:self_consumption.py:704 ���ɷ�����ɣ�8760 �㣨60 ���ӣ���������=66.3412%���ھ����Է����á¹���������������ɸ�����=60.8128%���ھ����Է����á¸��ɵ�������������=33.6588%������������=39.1872%����Դ=���˵����㸺��
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_values_and_calibers_writt0\����.xlsx��32 �Ź������
+_ ERROR at setup of TestPdfLoadConsumptionSection.test_story_contains_metrics_and_calibers _
+
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_story_contains_metrics_an0')
+
+    # --------------------------------------------------------------------------- #
+    @pytest.fixture
+    def exported_with_analysis(tmp_path):
+        """����һ����ʵ��"���㸺�� �� ���ɷ���"����������� Excel/PDF��"""
+        from cenep.application.load_profile_service import LoadProfileService
+        from cenep.domain.enums import ProjectType
+        from cenep.domain.load_estimate import LoadEstimateParams, MonthlyLoadEnergy
+        from cenep.domain.models import BasicInfo, Project, PVConfig
+    
+        project = Project(
+            basic_info=BasicInfo(
+                project_name="�������ɲ���", province="����", project_type=ProjectType.COMMERCIAL_PV
+            ),
+            pv=PVConfig(
+                pv_capacity_kwp=1000.0,
+                equivalent_hours=1100.0,
+                performance_ratio=1.0,
+                annual_degradation_rate=0.0,
+            ),
+        )
+        service = LoadProfileService(project, project_id="RPT")
+        monthly = [MonthlyLoadEnergy(year=2025, month=m, energy_kwh=100_000.0) for m in range(1, 13)]
+        service.estimate_load(
+            LoadEstimateParams(year=2025, interval_minutes=60, template_id="double_shift"),
+            monthly=monthly,
+        )
+        consumption = service.analyze()
+        portrait = service.portrait()
+        result = calculation_engine.calculate(project)
+        excel = ExcelExporter().export(
+            project, result, tmp_path / "����.xlsx", self_consumption=consumption, load_portrait=portrait
+>       )
+
+tests\test_load_ui_report.py:417: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0BFD49D30>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�������ɲ���', province='����', city='', ..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�������ɲ���', project_type='COMMERCIAL_PV', province='����', city='', pv_capacity_kwp=1000.0,...Wh��������� 0.000000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = SelfConsumptionResult(load_energy_kwh=1200000.0, pv_generation_kwh=1100000.0, pv_used_on_site_kwh=729753.4431281213, p...����ʵ�⣩', pv_provenance_text='���ЧСʱ��V1 �ھ���������/ģ�����������ʵ�⣩������ 1000 kWp����ЧСʱ 1100 h�����ܱ� 1.0000', pv_source_is_estimate=True)
+load_portrait = LoadPortrait(profile_id='2025�����˵�����_double_shift@60min', name='2025 �����˵����㸺�ɣ�ģ�壺˫��������60 ���ӣ�', source_type=<LoadDataSou...44.83133184478888, 128.27917963395632, 103.4509513177062, 86.89879910687341, 72.41566592239444), interval_minutes=60)])
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+---------------------------- Captured stderr setup ----------------------------
+2026-10-10 02:13:16 | INFO    | cenep.calculation.load_estimate | ���˵�������ɣ�ģ��=double_shift�����=60 ���ӡ�8760 �㣻�����µ����ϼ� 1200000.000 kWh������ϼ� 1200000.000 kWh������²в� 0.000e+00 kWh�������߱��=�������ݣ�����ʵ�⣩
+2026-10-10 02:13:16 | INFO    | cenep.application.load_profile_service | �ǼǸ������ݼ���2025�����˵�����_double_shift@60min����Դ=���˵����㸺�ɡ�����=True������=True��
+2026-10-10 02:13:16 | INFO    | cenep.calculation.self_consumption | ���ɷ�����ɣ�8760 �㣨60 ���ӣ���������=66.3412%���ھ����Է����á¹���������������ɸ�����=60.8128%���ھ����Է����á¸��ɵ�������������=33.6588%������������=39.1872%����Դ=���˵����㸺��
+2026-10-10 02:13:21 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:13:21 | INFO    | cenep | ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_story_contains_metrics_an0\����.xlsx��32 �Ź������
+----------------------------- Captured log setup ------------------------------
+INFO     cenep.calculation.load_estimate:load_estimate.py:547 ���˵�������ɣ�ģ��=double_shift�����=60 ���ӡ�8760 �㣻�����µ����ϼ� 1200000.000 kWh������ϼ� 1200000.000 kWh������²в� 0.000e+00 kWh�������߱��=�������ݣ�����ʵ�⣩
+INFO     cenep.application.load_profile_service:load_profile_service.py:188 �ǼǸ������ݼ���2025�����˵�����_double_shift@60min����Դ=���˵����㸺�ɡ�����=True������=True��
+INFO     cenep.calculation.self_consumption:self_consumption.py:704 ���ɷ�����ɣ�8760 �㣨60 ���ӣ���������=66.3412%���ھ����Է����á¹���������������ɸ�����=60.8128%���ھ����Է����á¸��ɵ�������������=33.6588%������������=39.1872%����Դ=���˵����㸺��
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_story_contains_metrics_an0\����.xlsx��32 �Ź������
+____ ERROR at setup of TestPdfLoadConsumptionSection.test_pdf_file_written ____
+
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_pdf_file_written0')
+
+    # --------------------------------------------------------------------------- #
+    @pytest.fixture
+    def exported_with_analysis(tmp_path):
+        """����һ����ʵ��"���㸺�� �� ���ɷ���"����������� Excel/PDF��"""
+        from cenep.application.load_profile_service import LoadProfileService
+        from cenep.domain.enums import ProjectType
+        from cenep.domain.load_estimate import LoadEstimateParams, MonthlyLoadEnergy
+        from cenep.domain.models import BasicInfo, Project, PVConfig
+    
+        project = Project(
+            basic_info=BasicInfo(
+                project_name="�������ɲ���", province="����", project_type=ProjectType.COMMERCIAL_PV
+            ),
+            pv=PVConfig(
+                pv_capacity_kwp=1000.0,
+                equivalent_hours=1100.0,
+                performance_ratio=1.0,
+                annual_degradation_rate=0.0,
+            ),
+        )
+        service = LoadProfileService(project, project_id="RPT")
+        monthly = [MonthlyLoadEnergy(year=2025, month=m, energy_kwh=100_000.0) for m in range(1, 13)]
+        service.estimate_load(
+            LoadEstimateParams(year=2025, interval_minutes=60, template_id="double_shift"),
+            monthly=monthly,
+        )
+        consumption = service.analyze()
+        portrait = service.portrait()
+        result = calculation_engine.calculate(project)
+        excel = ExcelExporter().export(
+            project, result, tmp_path / "����.xlsx", self_consumption=consumption, load_portrait=portrait
+>       )
+
+tests\test_load_ui_report.py:417: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C11EC530>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�������ɲ���', province='����', city='', ..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�������ɲ���', project_type='COMMERCIAL_PV', province='����', city='', pv_capacity_kwp=1000.0,...Wh��������� 0.000000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = SelfConsumptionResult(load_energy_kwh=1200000.0, pv_generation_kwh=1100000.0, pv_used_on_site_kwh=729753.4431281213, p...����ʵ�⣩', pv_provenance_text='���ЧСʱ��V1 �ھ���������/ģ�����������ʵ�⣩������ 1000 kWp����ЧСʱ 1100 h�����ܱ� 1.0000', pv_source_is_estimate=True)
+load_portrait = LoadPortrait(profile_id='2025�����˵�����_double_shift@60min', name='2025 �����˵����㸺�ɣ�ģ�壺˫��������60 ���ӣ�', source_type=<LoadDataSou...44.83133184478888, 128.27917963395632, 103.4509513177062, 86.89879910687341, 72.41566592239444), interval_minutes=60)])
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+---------------------------- Captured stderr setup ----------------------------
+2026-10-10 02:13:22 | INFO    | cenep.calculation.load_estimate | ���˵�������ɣ�ģ��=double_shift�����=60 ���ӡ�8760 �㣻�����µ����ϼ� 1200000.000 kWh������ϼ� 1200000.000 kWh������²в� 0.000e+00 kWh�������߱��=�������ݣ�����ʵ�⣩
+2026-10-10 02:13:22 | INFO    | cenep.application.load_profile_service | �ǼǸ������ݼ���2025�����˵�����_double_shift@60min����Դ=���˵����㸺�ɡ�����=True������=True��
+2026-10-10 02:13:22 | INFO    | cenep.calculation.self_consumption | ���ɷ�����ɣ�8760 �㣨60 ���ӣ���������=66.3412%���ھ����Է����á¹���������������ɸ�����=60.8128%���ھ����Է����á¸��ɵ�������������=33.6588%������������=39.1872%����Դ=���˵����㸺��
+2026-10-10 02:13:27 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:13:27 | INFO    | cenep | ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_pdf_file_written0\����.xlsx��32 �Ź������
+----------------------------- Captured log setup ------------------------------
+INFO     cenep.calculation.load_estimate:load_estimate.py:547 ���˵�������ɣ�ģ��=double_shift�����=60 ���ӡ�8760 �㣻�����µ����ϼ� 1200000.000 kWh������ϼ� 1200000.000 kWh������²в� 0.000e+00 kWh�������߱��=�������ݣ�����ʵ�⣩
+INFO     cenep.application.load_profile_service:load_profile_service.py:188 �ǼǸ������ݼ���2025�����˵�����_double_shift@60min����Դ=���˵����㸺�ɡ�����=True������=True��
+INFO     cenep.calculation.self_consumption:self_consumption.py:704 ���ɷ�����ɣ�8760 �㣨60 ���ӣ���������=66.3412%���ھ����Է����á¹���������������ɸ�����=60.8128%���ھ����Է����á¸��ɵ�������������=33.6588%������������=39.1872%����Դ=���˵����㸺��
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_pdf_file_written0\����.xlsx��32 �Ź������
+______________ ERROR at setup of TestFileOutput.test_pdf_created ______________
+
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_pdf_created0')
+
+    for row in item._cellvalues:
+        for cell in row:
+            if isinstance(cell, str):
+>               parts.append(cell)
+
+tests\test_pdf_export.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4BB9790>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+______________ ERROR at setup of TestFileOutput.test_is_real_pdf ______________
+
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_is_real_pdf0')
+
+    for row in item._cellvalues:
+        for cell in row:
+            if isinstance(cell, str):
+>               parts.append(cell)
+
+tests\test_pdf_export.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D48D6720>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_______________ ERROR at setup of TestFileOutput.test_multipage _______________
+
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_multipage0')
+
+    for row in item._cellvalues:
+        for cell in row:
+            if isinstance(cell, str):
+>               parts.append(cell)
+
+tests\test_pdf_export.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D48D6090>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+================================== FAILURES ===================================
+___ TestMissingValueDisplay.test_excel_and_pdf_never_show_zero_for_missing ____
+
+self = <test_bill_ui_report.TestMissingValueDisplay object at 0x000001D0BF9879B0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+service = <cenep.application.bill_service.BillService object at 0x000001D0C157D5E0>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_excel_and_pdf_never_show_0')
+
+    def test_excel_and_pdf_never_show_zero_for_missing(self, project, service, tmp_path: Path):
+        _create(service, energy_total_kwh=None, bill_total_yuan=None)
+        result = calculation_engine.calculate(project)
+    
+        wb = load_workbook(ExcelExporter().export(project, result, tmp_path / "missing.xlsx"))
+        ws = wb["�˵�ԭʼ����"]
+        header = [cell.value for cell in ws[3]]
+        energy_col = header.index(BILL_FIELD_LABELS["energy_total_kwh"]) + 1
+        amount_col = header.index(BILL_FIELD_LABELS["bill_total_yuan"]) + 1
+        data_row = 4
+        assert ws.cell(row=data_row, column=energy_col).value == BILL_NOT_PROVIDED_TEXT
+        assert ws.cell(row=data_row, column=amount_col).value == BILL_NOT_PROVIDED_TEXT
+    
+>       text = _story_text(project)
+               ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_bill_ui_report.py:470: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_bill_ui_report.py:174: in _story_text
+    return _collect_text(PdfExporter().build_story(project, result, styles))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0BDD4EA20>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�˵�ҳ������Ŀ', project_type='COMMERCIAL_PV', province='����', city='�人��', pv_capacity_kwp=100...Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    def build_story(
+        self,
+        project: Project,
+        result: CalculationResult,
+        styles: dict,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> list:
+        """���� reportlab �ĵ�������������ڲ����븴�á�
+    
+        :param self_consumption: ��ѡ�� :class:`cenep.domain.self_consumption_result.SelfConsumptionResult`
+            ��V2.2 �׶� 4����Ϊ ``None`` ʱ�������"��δִ�����ɷ���"������˵����
+            **�������κ���ֵ**�����е��÷���ֻ������λ�ò�������Ϊ��ȫ���䡣
+        :param load_portrait: ��ѡ�� :class:`cenep.calculation.load_portrait.LoadPortrait`
+            �����ɻ��񣩡�Ϊ ``None`` ʱֻ������ɲ��֡�
+        """
+        self._self_consumption = self_consumption
+        self._load_portrait = load_portrait
+        story: list = []
+    
+        # ---------- ���� ----------
+        story.append(Spacer(1, 40 * mm))
+        story.append(Paragraph("����ҵ����Դ��Ŀ�������۱���", styles["title"]))
+        story.append(Spacer(1, 10 * mm))
+        story.append(Paragraph(f"��Ŀ���ƣ�{project.basic_info.project_name}", styles["subtitle"]))
+        story.append(Paragraph(f"��Ŀ���ͣ�{project.basic_info.project_type.label}", styles["subtitle"]))
+        story.append(
+            Paragraph(f"��Ŀ�ص㣺{project.basic_info.province}{project.basic_info.city}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"�������ڣ�{project.basic_info.evaluation_date.isoformat()}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"��������ʱ�䣺{datetime.now().isoformat(timespec='seconds')}", styles["subtitle"])
+        )
+        if project.policy is not None and project.policy.policy_name:
+            story.append(Paragraph(f"�������ߣ�{project.policy.display_version}", styles["subtitle"]))
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(DISCLAIMER, styles["small"]))
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        story.append(PageBreak())
+    
+        # ---------- ���ݿھ�ͼ����V2.4 ��8.1���������ݲ��û�Ϊһ̸�� ----------
+        story.append(Paragraph("���ݿھ�ͼ����V2.4 ��8.1��", styles["h2"]))
+        story.append(
+            self._table(
+                ["�������", "�������ڱ����е�λ��"],
+>               [[name, text] for name, text in CALIBER_LEGEND],
+                                                ^^^^^^^^^^^^^^
+                styles,
+            )
+        )
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+---------------------------- Captured stderr call -----------------------------
+2026-10-10 02:10:08 | INFO    | cenep | �����˵���2026-01 �˵� BILL-20260101-20260131-M001������ 2026-01-01 ~ 2026-01-31���ܵ��� δ�ṩ���˵��ܶ� δ�ṩ����Դ �ֶ�¼��
+2026-10-10 02:10:09 | INFO    | cenep.calculation.bill_calculator | ����˵����ܣ�2026 �꣬1 ���˵��������� 8.3%����ֱ�����=False
+2026-10-10 02:10:09 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:10:09 | INFO    | cenep | ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_excel_and_pdf_never_show_0\missing.xlsx��32 �Ź������
+------------------------------ Captured log call ------------------------------
+INFO     cenep:bill_service.py:321 �����˵���2026-01 �˵� BILL-20260101-20260131-M001������ 2026-01-01 ~ 2026-01-31���ܵ��� δ�ṩ���˵��ܶ� δ�ṩ����Դ �ֶ�¼��
+INFO     cenep.calculation.bill_calculator:bill_calculator.py:697 ����˵����ܣ�2026 �꣬1 ���˵��������� 8.3%����ֱ�����=False
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_excel_and_pdf_never_show_0\missing.xlsx��32 �Ź������
+__________________ TestPdfBillSection.test_eighteen_sections __________________
+
+self = <test_bill_ui_report.TestPdfBillSection object at 0x000001D0BF986D80>
+
+    def test_eighteen_sections(self):
+        """V2.1 ��8.1 �����˵��½ڣ�17 ���֣���V2.2 ��6.3 �ٲ��븺�ɹ����������½ڣ�18 ���֣���"""
+>       assert len(REPORT_SECTIONS) == 18
+E       AssertionError: assert 21 == 18
+E        +  where 21 = len(['��Ŀ�ſ�', '�������', '������Դ�������ȼ�', '�˵���ʵ��У��', '��׼�˵�У׼', '���ɷ���', ...])
+
+tests\test_bill_ui_report.py:772: AssertionError
+_____ TestPdfBillSection.test_section_without_bills_explains_how_to_enter _____
+
+self = <test_bill_ui_report.TestPdfBillSection object at 0x000001D0BF9876B0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+    def test_section_without_bills_explains_how_to_enter(self, project):
+        assert project.bills == []
+>       text = _story_text(project)
+               ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_bill_ui_report.py:778: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_bill_ui_report.py:174: in _story_text
+    return _collect_text(PdfExporter().build_story(project, result, styles))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C7141C70>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�˵�ҳ������Ŀ', project_type='COMMERCIAL_PV', province='����', city='�人��', pv_capacity_kwp=100...Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    def build_story(
+        self,
+        project: Project,
+        result: CalculationResult,
+        styles: dict,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> list:
+        """���� reportlab �ĵ�������������ڲ����븴�á�
+    
+        :param self_consumption: ��ѡ�� :class:`cenep.domain.self_consumption_result.SelfConsumptionResult`
+            ��V2.2 �׶� 4����Ϊ ``None`` ʱ�������"��δִ�����ɷ���"������˵����
+            **�������κ���ֵ**�����е��÷���ֻ������λ�ò�������Ϊ��ȫ���䡣
+        :param load_portrait: ��ѡ�� :class:`cenep.calculation.load_portrait.LoadPortrait`
+            �����ɻ��񣩡�Ϊ ``None`` ʱֻ������ɲ��֡�
+        """
+        self._self_consumption = self_consumption
+        self._load_portrait = load_portrait
+        story: list = []
+    
+        # ---------- ���� ----------
+        story.append(Spacer(1, 40 * mm))
+        story.append(Paragraph("����ҵ����Դ��Ŀ�������۱���", styles["title"]))
+        story.append(Spacer(1, 10 * mm))
+        story.append(Paragraph(f"��Ŀ���ƣ�{project.basic_info.project_name}", styles["subtitle"]))
+        story.append(Paragraph(f"��Ŀ���ͣ�{project.basic_info.project_type.label}", styles["subtitle"]))
+        story.append(
+            Paragraph(f"��Ŀ�ص㣺{project.basic_info.province}{project.basic_info.city}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"�������ڣ�{project.basic_info.evaluation_date.isoformat()}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"��������ʱ�䣺{datetime.now().isoformat(timespec='seconds')}", styles["subtitle"])
+        )
+        if project.policy is not None and project.policy.policy_name:
+            story.append(Paragraph(f"�������ߣ�{project.policy.display_version}", styles["subtitle"]))
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(DISCLAIMER, styles["small"]))
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        story.append(PageBreak())
+    
+        # ---------- ���ݿھ�ͼ����V2.4 ��8.1���������ݲ��û�Ϊһ̸�� ----------
+        story.append(Paragraph("���ݿھ�ͼ����V2.4 ��8.1��", styles["h2"]))
+        story.append(
+            self._table(
+                ["�������", "�������ڱ����е�λ��"],
+>               [[name, text] for name, text in CALIBER_LEGEND],
+                                                ^^^^^^^^^^^^^^
+                styles,
+            )
+        )
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+______ TestPdfBillSection.test_section_with_bills_shows_facts_and_checks ______
+
+self = <test_bill_ui_report.TestPdfBillSection object at 0x000001D0BF9F6930>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+service = <cenep.application.bill_service.BillService object at 0x000001D0C1443E60>
+
+    def test_section_with_bills_shows_facts_and_checks(self, project, service):
+        _create(service, energy_total_kwh=None, bill_total_yuan=None)
+>       text = _story_text(project)
+               ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_bill_ui_report.py:787: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_bill_ui_report.py:174: in _story_text
+    return _collect_text(PdfExporter().build_story(project, result, styles))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C14BA180>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�˵�ҳ������Ŀ', project_type='COMMERCIAL_PV', province='����', city='�人��', pv_capacity_kwp=100...Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    def build_story(
+        self,
+        project: Project,
+        result: CalculationResult,
+        styles: dict,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> list:
+        """���� reportlab �ĵ�������������ڲ����븴�á�
+    
+        :param self_consumption: ��ѡ�� :class:`cenep.domain.self_consumption_result.SelfConsumptionResult`
+            ��V2.2 �׶� 4����Ϊ ``None`` ʱ�������"��δִ�����ɷ���"������˵����
+            **�������κ���ֵ**�����е��÷���ֻ������λ�ò�������Ϊ��ȫ���䡣
+        :param load_portrait: ��ѡ�� :class:`cenep.calculation.load_portrait.LoadPortrait`
+            �����ɻ��񣩡�Ϊ ``None`` ʱֻ������ɲ��֡�
+        """
+        self._self_consumption = self_consumption
+        self._load_portrait = load_portrait
+        story: list = []
+    
+        # ---------- ���� ----------
+        story.append(Spacer(1, 40 * mm))
+        story.append(Paragraph("����ҵ����Դ��Ŀ�������۱���", styles["title"]))
+        story.append(Spacer(1, 10 * mm))
+        story.append(Paragraph(f"��Ŀ���ƣ�{project.basic_info.project_name}", styles["subtitle"]))
+        story.append(Paragraph(f"��Ŀ���ͣ�{project.basic_info.project_type.label}", styles["subtitle"]))
+        story.append(
+            Paragraph(f"��Ŀ�ص㣺{project.basic_info.province}{project.basic_info.city}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"�������ڣ�{project.basic_info.evaluation_date.isoformat()}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"��������ʱ�䣺{datetime.now().isoformat(timespec='seconds')}", styles["subtitle"])
+        )
+        if project.policy is not None and project.policy.policy_name:
+            story.append(Paragraph(f"�������ߣ�{project.policy.display_version}", styles["subtitle"]))
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(DISCLAIMER, styles["small"]))
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        story.append(PageBreak())
+    
+        # ---------- ���ݿھ�ͼ����V2.4 ��8.1���������ݲ��û�Ϊһ̸�� ----------
+        story.append(Paragraph("���ݿھ�ͼ����V2.4 ��8.1��", styles["h2"]))
+        story.append(
+            self._table(
+                ["�������", "�������ڱ����е�λ��"],
+>               [[name, text] for name, text in CALIBER_LEGEND],
+                                                ^^^^^^^^^^^^^^
+                styles,
+            )
+        )
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+---------------------------- Captured stderr call -----------------------------
+2026-10-10 02:10:15 | INFO    | cenep | �����˵���2026-01 �˵� BILL-20260101-20260131-M001������ 2026-01-01 ~ 2026-01-31���ܵ��� δ�ṩ���˵��ܶ� δ�ṩ����Դ �ֶ�¼��
+------------------------------ Captured log call ------------------------------
+INFO     cenep:bill_service.py:321 �����˵���2026-01 �˵� BILL-20260101-20260131-M001������ 2026-01-01 ~ 2026-01-31���ܵ��� δ�ṩ���˵��ܶ� δ�ṩ����Դ �ֶ�¼��
+____________ TestPdfBillSection.test_pdf_file_generated_both_cases ____________
+
+self = <test_bill_ui_report.TestPdfBillSection object at 0x000001D0BF9F6210>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+service = <cenep.application.bill_service.BillService object at 0x000001D0C6F36960>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_pdf_file_generated_both_c0')
+
+    def test_pdf_file_generated_both_cases(self, project, service, tmp_path: Path):
+        empty_result = calculation_engine.calculate(project)
+>       empty_pdf = PdfExporter().export(project, empty_result, tmp_path / "���˵�")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_bill_ui_report.py:800: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    author=APP_NAME,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C12AB470>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�˵�ҳ������Ŀ', project_type='COMMERCIAL_PV', province='����', city='�人��', pv_capacity_kwp=100...Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    def build_story(
+        self,
+        project: Project,
+        result: CalculationResult,
+        styles: dict,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> list:
+        """���� reportlab �ĵ�������������ڲ����븴�á�
+    
+        :param self_consumption: ��ѡ�� :class:`cenep.domain.self_consumption_result.SelfConsumptionResult`
+            ��V2.2 �׶� 4����Ϊ ``None`` ʱ�������"��δִ�����ɷ���"������˵����
+            **�������κ���ֵ**�����е��÷���ֻ������λ�ò�������Ϊ��ȫ���䡣
+        :param load_portrait: ��ѡ�� :class:`cenep.calculation.load_portrait.LoadPortrait`
+            �����ɻ��񣩡�Ϊ ``None`` ʱֻ������ɲ��֡�
+        """
+        self._self_consumption = self_consumption
+        self._load_portrait = load_portrait
+        story: list = []
+    
+        # ---------- ���� ----------
+        story.append(Spacer(1, 40 * mm))
+        story.append(Paragraph("����ҵ����Դ��Ŀ�������۱���", styles["title"]))
+        story.append(Spacer(1, 10 * mm))
+        story.append(Paragraph(f"��Ŀ���ƣ�{project.basic_info.project_name}", styles["subtitle"]))
+        story.append(Paragraph(f"��Ŀ���ͣ�{project.basic_info.project_type.label}", styles["subtitle"]))
+        story.append(
+            Paragraph(f"��Ŀ�ص㣺{project.basic_info.province}{project.basic_info.city}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"�������ڣ�{project.basic_info.evaluation_date.isoformat()}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"��������ʱ�䣺{datetime.now().isoformat(timespec='seconds')}", styles["subtitle"])
+        )
+        if project.policy is not None and project.policy.policy_name:
+            story.append(Paragraph(f"�������ߣ�{project.policy.display_version}", styles["subtitle"]))
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(DISCLAIMER, styles["small"]))
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        story.append(PageBreak())
+    
+        # ---------- ���ݿھ�ͼ����V2.4 ��8.1���������ݲ��û�Ϊһ̸�� ----------
+        story.append(Paragraph("���ݿھ�ͼ����V2.4 ��8.1��", styles["h2"]))
+        story.append(
+            self._table(
+                ["�������", "�������ڱ����е�λ��"],
+>               [[name, text] for name, text in CALIBER_LEGEND],
+                                                ^^^^^^^^^^^^^^
+                styles,
+            )
+        )
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_______ TestPdfBillSection.test_section_order_keeps_bill_chapter_third ________
+
+self = <test_bill_ui_report.TestPdfBillSection object at 0x000001D0BF9F5A90>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+    def test_section_order_keeps_bill_chapter_third(self, project):
+>       text = _story_text(project)
+               ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_bill_ui_report.py:812: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_bill_ui_report.py:174: in _story_text
+    return _collect_text(PdfExporter().build_story(project, result, styles))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C4BA8B60>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='�˵�ҳ������Ŀ', province='����', city='�人..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='�˵�ҳ������Ŀ', project_type='COMMERCIAL_PV', province='����', city='�人��', pv_capacity_kwp=100...Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    def build_story(
+        self,
+        project: Project,
+        result: CalculationResult,
+        styles: dict,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> list:
+        """���� reportlab �ĵ�������������ڲ����븴�á�
+    
+        :param self_consumption: ��ѡ�� :class:`cenep.domain.self_consumption_result.SelfConsumptionResult`
+            ��V2.2 �׶� 4����Ϊ ``None`` ʱ�������"��δִ�����ɷ���"������˵����
+            **�������κ���ֵ**�����е��÷���ֻ������λ�ò�������Ϊ��ȫ���䡣
+        :param load_portrait: ��ѡ�� :class:`cenep.calculation.load_portrait.LoadPortrait`
+            �����ɻ��񣩡�Ϊ ``None`` ʱֻ������ɲ��֡�
+        """
+        self._self_consumption = self_consumption
+        self._load_portrait = load_portrait
+        story: list = []
+    
+        # ---------- ���� ----------
+        story.append(Spacer(1, 40 * mm))
+        story.append(Paragraph("����ҵ����Դ��Ŀ�������۱���", styles["title"]))
+        story.append(Spacer(1, 10 * mm))
+        story.append(Paragraph(f"��Ŀ���ƣ�{project.basic_info.project_name}", styles["subtitle"]))
+        story.append(Paragraph(f"��Ŀ���ͣ�{project.basic_info.project_type.label}", styles["subtitle"]))
+        story.append(
+            Paragraph(f"��Ŀ�ص㣺{project.basic_info.province}{project.basic_info.city}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"�������ڣ�{project.basic_info.evaluation_date.isoformat()}", styles["subtitle"])
+        )
+        story.append(
+            Paragraph(f"��������ʱ�䣺{datetime.now().isoformat(timespec='seconds')}", styles["subtitle"])
+        )
+        if project.policy is not None and project.policy.policy_name:
+            story.append(Paragraph(f"�������ߣ�{project.policy.display_version}", styles["subtitle"]))
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(DISCLAIMER, styles["small"]))
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        story.append(PageBreak())
+    
+        # ---------- ���ݿھ�ͼ����V2.4 ��8.1���������ݲ��û�Ϊһ̸�� ----------
+        story.append(Paragraph("���ݿھ�ͼ����V2.4 ��8.1��", styles["h2"]))
+        story.append(
+            self._table(
+                ["�������", "�������ڱ����е�λ��"],
+>               [[name, text] for name, text in CALIBER_LEGEND],
+                                                ^^^^^^^^^^^^^^
+                styles,
+            )
+        )
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+___________ TestWorkbookStructure.test_sheets_match_names_and_count ___________
+
+self = <test_excel_export.TestWorkbookStructure object at 0x000001D0BFABA450>
+exported = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='...C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_sheets_match_names_and_co0/����.xlsx'))
+
+    def test_sheets_match_names_and_count(self, exported):
+        """V2 ��67 + V2.1 ��8.1 + V2.2 ��6.3��V1 ��108 �� 13 �� + V2 ���� 11 ��ʱ���
+        + V2.1 ���� 2 ���˵��� + V2.2 �׶� 4 ���� 1 �š������ʷ�����= 27 �š�
+    
+        ���� V2 ��67�����ٰ�������V2.1 ��8.1 �� V2.2 ��6.3 �� V1 ��108 ��**����������չ**��
+        V1 �� 13 ��ȫ�����������˳�򲻱䣬���������޶�Ӧ����ʱ�������˵����
+        ��� V1 ��Ŀ�����˵���Ŀ���޸�����Ŀ�Կ������������� test_v1_project_still_exports����
+        """
+        _, _, path = exported
+        wb = load_workbook(path)
+        assert wb.sheetnames == SHEET_NAMES
+>       assert len(wb.sheetnames) == 27
+E       AssertionError: assert 32 == 27
+E        +  where 32 = len(['��Ŀ�ſ�', '��������', '��������', '���������', '��������', '�������', ...])
+E        +    where ['��Ŀ�ſ�', '��������', '��������', '���������', '��������', '�������', ...] = <openpyxl.workbook.workbook.Workbook object at 0x000001D0CA4BF350>.sheetnames
+
+tests\test_excel_export.py:54: AssertionError
+---------------------------- Captured stderr setup ----------------------------
+2026-10-10 02:11:26 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:11:26 | INFO    | cenep | ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_sheets_match_names_and_co0\����.xlsx��32 �Ź������
+----------------------------- Captured log setup ------------------------------
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_sheets_match_names_and_co0\����.xlsx��32 �Ź������
+_ TestPdfLoadConsumptionSection.test_story_without_analysis_still_declares_section _
+
+self = <test_load_ui_report.TestPdfLoadConsumptionSection object at 0x000001D0BFE57CB0>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+    
+    def test_story_without_analysis_still_declares_section(self, golden_pv_storage):
+        result = calculation_engine.calculate(golden_pv_storage)
+>       styles = _styles(register_cjk_font())
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_load_ui_report.py:477: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D487F8F0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________ TestReportStructure.test_eighteen_sections_declared _____________
+
+self = <test_pdf_export.TestReportStructure object at 0x000001D0BFF03620>
+
+    
+    @pytest.fixture
+    def exported(golden_pv_storage, tmp_path: Path):
+>       result = calculation_engine.calculate(golden_pv_storage)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 21 == 18
+E        +  where 21 = len(['��Ŀ�ſ�', '�������', '������Դ�������ȼ�', '�˵���ʵ��У��', '��׼�˵�У׼', '���ɷ���', ...])
+
+tests\test_pdf_export.py:47: AssertionError
+_____________ TestReportStructure.test_v21_bill_section_declared ______________
+
+self = <test_pdf_export.TestReportStructure object at 0x000001D0BFF030E0>
+
+    
+    class TestReportStructure:
+        def test_section_count_comes_from_declaration(self):
+>           """�½���**����Ӳ����**��һ������ :data:`REPORT_SECTIONS`��V2.4 ��8.1 ��������
+    
+            ��ʷ��V2 ��66 �� V1 ��110 �� 15 ������Ϊ 16 ���֣�V2.1 ��8.1 �������˵���ʵ��У�项�� 17��
+            V2.2 ��6.3���׶� 4�����������ɹ����������ɡ��� 18��
+            V2.4 ��8.1���׶� 7������ 6 �� �� 21�����ѡ�����ָ�꡹�롸���ա��ϲ�Ϊ
+            ��������ָ���������ʾ�����ѡ��������������롸�ؼ����衢δ��ģ����������������
+            """
+E           AssertionError: assert 3 == (1 + 1)
+E            +  where 3 = <built-in method index of list object at 0x000001D0BE83C5C0>('�˵���ʵ��У��')
+E            +    where <built-in method index of list object at 0x000001D0BE83C5C0> = ['��Ŀ�ſ�', '�������', '������Դ�������ȼ�', '�˵���ʵ��У��', '��׼�˵�У׼', '���ɷ���', ...].index
+E            +  and   1 = <built-in method index of list object at 0x000001D0BE83C5C0>('�������')
+E            +    where <built-in method index of list object at 0x000001D0BE83C5C0> = ['��Ŀ�ſ�', '�������', '������Դ�������ȼ�', '�˵���ʵ��У��', '��׼�˵�У׼', '���ɷ���', ...].index
+
+tests\test_pdf_export.py:54: AssertionError
+___________ TestReportStructure.test_all_sections_present_in_story ____________
+
+self = <test_pdf_export.TestReportStructure object at 0x000001D0BFF46330>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+    """V2.4 ��8.1 �� 6 �������½ڱ���������"""
+    for name in (
+        "������Դ�������ȼ�", "��׼�˵�У׼", "�¶ȵ�ѷ���",
+        "����ǰ���Ѳ��", "������ָ���������ʾ", "�ؼ����衢δ��ģ������������",
+>   ):
+       
+
+tests\test_pdf_export.py:71: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0BFA834A0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________________ TestFileOutput.test_suffix_appended _____________________
+
+self = <test_pdf_export.TestFileOutput object at 0x000001D0BFF45A90>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_suffix_appended0')
+
+    def test_v22_load_consumption_section_declared(self):
+        """V2.2 ��6.3���׶� 4�������ɹ������������½ڱ���λ�ڡ����ɷ�����֮��"""
+>       assert "���ɹ�����������" in REPORT_SECTIONS
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4BD6630>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+________________ TestFileOutput.test_dotted_name_not_truncated ________________
+
+self = <test_pdf_export.TestFileOutput object at 0x000001D0BFF478F0>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_dotted_name_not_truncated1')
+
+    def test_v24_calibration_after_bill_and_before_load(self):
+        """V2.4 ��8.1����׼�˵�У׼����˵��½ڣ����ڸ����½�֮ǰ��"""
+        assert REPORT_SECTIONS.index("��׼�˵�У׼") == REPORT_SECTIONS.index("�˵���ʵ��У��") + 1
+>       assert REPORT_SECTIONS.index("��׼�˵�У׼") < REPORT_SECTIONS.index("���ɷ���")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:95: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D48D7680>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_______________ TestDisclaimers.test_disclaimer_in_story_twice ________________
+
+self = <test_pdf_export.TestDisclaimers object at 0x000001D0BFF64680>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+    def test_v24_sections_present_without_optional_payloads(self, golden_pv_storage):
+        """�����κ� V2.4 ��ѡ���ʱ��6 �����½��ճ����ֲ�д������·������ȱ�½ڡ���������ֵ����"""
+        result = calculation_engine.calculate(golden_pv_storage)
+>       styles = __import__("cenep.reports.pdf_exporter", fromlist=["_styles"])._styles(register_cjk_font())
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:124: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4BB9CA0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________ TestValuesComeFromResult.test_irr_appears_in_story ______________
+
+self = <test_pdf_export.TestValuesComeFromResult object at 0x000001D0BFF64980>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+            assert "δ�����ⴢ�ĳ����ԱȽ��" in text
+    
+    
+>   class TestFileOutput:
+                    ^^^^^^
+
+tests\test_pdf_export.py:133: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D48D4D40>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+____________________ TestPolicySection.test_without_policy ____________________
+
+self = <test_pdf_export.TestPolicySection object at 0x000001D0BFF65370>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+
+>   ???
+
+tests\test_pdf_export.py:158: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4B62930>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________________ TestPolicySection.test_with_policy ______________________
+
+self = <test_pdf_export.TestPolicySection object at 0x000001D0BFF65670>
+golden_pv_storage = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+hubei_policy = PolicyProfile(policy_id='HUBEI-NEM-2025', policy_name='��������Դ�������ģ��', policy_version='2025-10-01', effective_date=datet...en_environmental_value=0.01, source='ϵͳ����ģ�壨����Ϊ����ֵ�����û����������ߺ˶ԣ�', source_url='', notes='ģ����ṩ�ṹ��������ֵ�������û�����Ŀ���ڵ�����������д��')
+
+            # ���ٷ��� + �������ҳ
+            assert raw.count(b"/Type /Page") >= 3
+    
+    
+    class TestDisclaimers:
+>       def test_disclaimer_text_matches_spec(self):
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:167: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0BFF64740>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._name='ϵͳ����ģ�壨����Ϊ����ֵ�����û����������ߺ˶ԣ�', source_date=None, source_url='', is_assumption=False, note='', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....38083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ', '������������ߣ���������Դ�������ģ�壨�汾��2025-10-01������Դ��ϵͳ����ģ�壨����Ϊ����ֵ�����û����������ߺ˶ԣ�����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+________ TestThreeProjectTypes.test_all_three_types_export[golden_pv] _________
+
+self = <test_pdf_export.TestThreeProjectTypes object at 0x000001D0BFF45BB0>
+fixture_name = 'golden_pv'
+request = <FixtureRequest for <Function test_all_three_types_export[golden_pv]>>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_all_three_types_export_go3')
+
+    def test_disclaimer_in_story_twice(self, golden_pv_storage):
+        result = calculation_engine.calculate(golden_pv_storage)
+        styles = __import__("cenep.reports.pdf_exporter", fromlist=["_styles"])._styles(register_cjk_font())
+        story = PdfExporter().build_story(golden_pv_storage, result, styles)
+>       texts = [f.text for f in story if isinstance(f, Paragraph)]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:178: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4BB8500>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='COMMERCIAL_PV', province='����', city='�人��', pv_capacity_kwp=10...Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�1.000000����� 1.000000 �� �ŵ� 1.000000����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+______ TestThreeProjectTypes.test_all_three_types_export[golden_storage] ______
+
+self = <test_pdf_export.TestThreeProjectTypes object at 0x000001D0BFF449E0>
+fixture_name = 'golden_storage'
+request = <FixtureRequest for <Function test_all_three_types_export[golden_storage]>>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_all_three_types_export_go4')
+
+    def test_disclaimer_in_story_twice(self, golden_pv_storage):
+        result = calculation_engine.calculate(golden_pv_storage)
+        styles = __import__("cenep.reports.pdf_exporter", fromlist=["_styles"])._styles(register_cjk_font())
+        story = PdfExporter().build_story(golden_pv_storage, result, styles)
+>       texts = [f.text for f in story if isinstance(f, Paragraph)]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:178: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4B62060>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='COMMERCIAL_STORAGE', province='����', city='�人��', pv_capacity_k...Ԫ/kWh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ������á�', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+____ TestThreeProjectTypes.test_all_three_types_export[golden_pv_storage] _____
+
+self = <test_pdf_export.TestThreeProjectTypes object at 0x000001D0BFF44B90>
+fixture_name = 'golden_pv_storage'
+request = <FixtureRequest for <Function test_all_three_types_export[golden_pv_storage]>>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_all_three_types_export_go5')
+
+    def test_disclaimer_in_story_twice(self, golden_pv_storage):
+        result = calculation_engine.calculate(golden_pv_storage)
+        styles = __import__("cenep.reports.pdf_exporter", fromlist=["_styles"])._styles(register_cjk_font())
+        story = PdfExporter().build_story(golden_pv_storage, result, styles)
+>       texts = [f.text for f in story if isinstance(f, Paragraph)]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_pdf_export.py:178: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D4C18E30>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________ TestExcelSheetSet.test_sheet_names_are_twenty_seven _____________
+
+self = <test_report_v2.TestExcelSheetSet object at 0x000001D0C0FE9310>
+
+    elif isinstance(item, Table):
+        for row in item._cellvalues:
+>           for cell in row:
+E           AssertionError: assert 32 == 27
+E            +  where 32 = len(['��Ŀ�ſ�', '��������', '��������', '���������', '��������', '�������', ...])
+
+tests\test_report_v2.py:101: AssertionError
+________________ TestPdfSections.test_v2_project_all_sections _________________
+
+self = <test_report_v2.TestPdfSections object at 0x000001D0C1016780>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+
+        if checked >= 5:
+            break
+>   assert checked >= 5, "δ��ƥ�䵽������"
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_report_v2.py:240: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D63A9DC0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+________________ TestPdfSections.test_v1_project_all_sections _________________
+
+self = <test_report_v2.TestPdfSections object at 0x000001D0C1016A80>
+v1_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='...h��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ']))
+
+    project, result = v2_case
+    ws = _export_excel(project, result, tmp_path / "v2.xlsx")["����ƽ��"]
+>   text = _sheet_text(ws)
+            ^^^^^^^^^^^^^^^
+
+tests\test_report_v2.py:247: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0DA104860>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_______________ TestPdfSections.test_section_order_follows_spec _______________
+
+self = <test_report_v2.TestPdfSections object at 0x000001D0C1016D50>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+
+>   ???
+
+tests\test_report_v2.py:256: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C4BB6300>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+__________ TestPdfSections.test_v1_project_notes_timeseries_disabled __________
+
+self = <test_report_v2.TestPdfSections object at 0x000001D0C1017050>
+v1_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='...h��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ']))
+
+>   ???
+
+tests\test_report_v2.py:271: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D56B50D0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+___________________ TestPdfCharts.test_three_charts_for_v2 ____________________
+
+self = <test_report_v2.TestPdfCharts object at 0x000001D0C1017380>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+
+    project, result = v2_case
+    story = PdfExporter().build_story(project, result, _styles(register_cjk_font()))
+    text = _collect_text(story)
+>   for section in REPORT_SECTIONS:
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_report_v2.py:280: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0C70B30B0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+____________ TestPdfCharts.test_charts_placed_in_expected_sections ____________
+
+self = <test_report_v2.TestPdfCharts object at 0x000001D0C10176B0>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+
+    project, result = v1_case
+    story = PdfExporter().build_story(project, result, _styles(register_cjk_font()))
+>   text = _collect_text(story)
+            ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_report_v2.py:286: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D9733350>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+____________ TestPdfCharts.test_no_charts_when_timeseries_disabled ____________
+
+self = <test_report_v2.TestPdfCharts object at 0x000001D0C1017A10>
+v1_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='...h��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ']))
+
+    title = section_title(index)
+    idx = text.find(title)
+>   assert idx >= 0, f"δ�ҵ��½� {title}"
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_report_v2.py:300: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D9731430>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='����ĳ����ҵ����', province='����', city='��..._DEFAULT'>, source_name='', source_date=None, source_url='', is_assumption=False, note='����Է�������', override_reason='')})
+result = CalculationResult(project_name='����ĳ����ҵ����', project_type='PV_STORAGE', province='����', city='�人��', pv_capacity_kwp=1000....Wh��������� 0.350000 Ԫ/kWh��', '�������ȡֵ���ݣ��û�ֱ�����롣', '��������Ч�ʣ�0.880000����� 0.938083 �� �ŵ� 0.938083����', '�����ʣ�0.080000�������ڣ�25 �ꡣ'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________ TestPdfCharts.test_pdf_renders_and_stays_reasonable _____________
+
+self = <test_report_v2.TestPdfCharts object at 0x000001D0C1017D40>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_pdf_renders_and_stays_rea0')
+
+    
+    def test_v24_section_titles_are_the_declared_ones(self, v2_case):
+>       project, result = v2_case
+               ^^^^^^^^^^^^^^^^^^^
+
+tests\test_report_v2.py:305: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\cenep\reports\pdf_exporter.py:1527: in export
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D6CEB740>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____ TestResultConsistency.test_both_excel_and_pdf_expose_v2_indicators ______
+
+self = <test_report_v2.TestResultConsistency object at 0x000001D0C10174A0>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_both_excel_and_pdf_expose0')
+
+>   ???
+
+tests\test_report_v2.py:365: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D8A203B0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+---------------------------- Captured stderr call -----------------------------
+2026-10-10 02:15:10 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:15:11 | INFO    | cenep | ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_both_excel_and_pdf_expose0\v2.xlsx��32 �Ź������
+------------------------------ Captured log call ------------------------------
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\Administrator\AppData\Local\Temp\pytest-of-Administrator\pytest-276\test_both_excel_and_pdf_expose0\v2.xlsx��32 �Ź������
+_________ TestResultConsistency.test_disclaimer_appears_twice_in_pdf __________
+
+self = <test_report_v2.TestResultConsistency object at 0x000001D0C1016F30>
+v2_case = (Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', ...�������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����']))
+
+    values = _numbers(ws)
+    for expected in (result.project_npv, result.total_capex, result.first_year_generation):
+>       assert any(v == pytest.approx(expected, rel=1e-12) for v in values), (
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            f"Excel ����ָ��ȱ�� / ��һ�£�{expected}"
+        )
+
+tests\test_report_v2.py:382: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cenep.reports.pdf_exporter.PdfExporter object at 0x000001D0D63A21B0>
+project = Project(schema_version='2.0', migration_notes=[], basic_info=BasicInfo(project_name='δ������Ŀ', province='����', city='', p..., bills=[], load_datasets=[], active_load_dataset_id='', analysis_period=25, discount_rate=0.08, parameter_registry={})
+result = CalculationResult(project_name='δ������Ŀ', project_type='PV_STORAGE', province='����', city='', pv_capacity_kwp=1000.0, sto...���������� timeseries.optimization_enabled = true�������¼��㡣Ĭ�Ϲرյ�ԭ��Ѱ��Ҫ�����ѡ��ʱ����桢�������ź�ѡ��������Ӫ�ڵľ�ȷ���ˣ���ʱԶ���ڳ�����㣨V2 ��45�C��48����86����'])
+styles = {'title': <ParagraphStyle 't'>, 'subtitle': <ParagraphStyle 'st'>, 'h1': <ParagraphStyle 'h1'>, 'h2': <ParagraphStyle 'h2'>, ...}
+self_consumption = None, load_portrait = None
+
+    
+    def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+        """``BillCalibrationSummary`` ��**չʾ��**����ֵȫ�����Է��񣬱�����ֻ����ʽ������
+    
+        �� :meth:`TariffService.calibration_rows_for_report` �ķֹ��������������ϸ���
+        �������Ȼ��ܵļ�ֵ�У����߶�����������V2.3 ��7.4 �� 5 ������
+        """
+        return [
+            ("У׼���", str(summary.year)),
+            ("���õ�ۼƻ�", f"{summary.tariff_plan_name or 'δָ��'}��{summary.tariff_plan_id or '��'}��"),
+            ("����ھ�", summary.basis_label),
+            ("�˵����� / ������", f"{summary.bill_count} �� / {len(summary.months_covered)} ����"),
+            ("�·ݸ�����", f"{summary.coverage_ratio:.2%}"),
+            ("ȱʧ�·�", "��".join(summary.missing_months) if summary.missing_months else "��"),
+            ("��ȵ����Ƿ��ֱ�����", "��" if summary.can_sum_directly else "��ȱ�� / �ص� / ���� / ����Ȼ�£�"),
+            ("�˵��ܶʵ���˵���", _bill_yuan(summary.total_bill_amount_yuan)),
+            ("����ϼƣ�����ģ���֣�", _bill_yuan(summary.total_recomputed_amount_yuan)),
+            ("�����ܶ��δ��ģ��׼��", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+            ("ë����ϼ�", _bill_yuan(summary.total_difference_yuan)),
+            ("������ϼƣ��ݲ��ж����ݣ�", _bill_yuan(summary.total_net_difference_yuan)),
+            ("�˵�����", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+            ("�������", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+            ("\u5355\u4ef7\u5dee\uff08\u590d\u7b97 \u2212 \u8d26\u5355\uff09", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+            ("�ݲ�", _bill_yuan(summary.tolerance_yuan)),
+            ("ͨ�� / δͨ������", f"{summary.passed_bills} / {summary.failed_bills}"),
+            (
+                "�Ƿ�ͨ���˵�У׼",
+                "�޷��жϣ��޿����˵���"
+                if summary.calibration_passed is None
+                else ("ͨ��" if summary.calibration_passed else "δͨ��������ʡ��ñ�Ϊ�����Ŷȣ���7.4 �� 6 ����"),
+            ),
+        ]
+    
+    
+    def _plan_source_summary(plan_ids: list[str] | None) -> str:
+        """��ۼƻ�����ԴժҪ��������˵�����β�����һ�棩��"""
+        if not plan_ids:
+            return ""
+        return "���β�����õĵ�ۼƻ���" + "��".join(plan_ids)
+    
+    
+    def _pdf_metric_rows(result) -> list[list[str]]:
+        """��������ָ��� ``[������, ��ʾֵ, �ھ�ȫ��]``��V2.2 ��3.3����12����
+    
+        �ھ�ȫ������桢Excel ��ȫͬԴ��������
+        :data:`cenep.calculation.self_consumption.CALIBERS`����
+        ��˱������"������"��Զ�������ķ������ĸ�����ᱻ������һ�ֿھ���
+        ��ĸΪ 0 ʱ��ʾ"������"��**����ʾ 0%**����3.3����
+        """
+>       rows: list[list[str]] = []
+                                   
+E       NameError: name 'CALIBER_LEGEND' is not defined
+
+src\cenep\reports\pdf_exporter.py:460: NameError
+_____________ TestSelfTest.test_selftest_passes_and_writes_report _____________
+
+self = <test_selftest.TestSelfTest object at 0x000001D0C10E36E0>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_selftest_passes_and_write0')
+
+    
+    class TestSelfTest:
+        def test_selftest_passes_and_writes_report(self, tmp_path: Path):
+>           output = tmp_path / "selftest.json"
+            ^^^^^^^^^^^^^^^^
+E           assert 1 == 0
+
+tests\test_selftest.py:19: AssertionError
+---------------------------- Captured stderr call -----------------------------
+2026-10-10 02:16:09 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:16:10 | INFO    | cenep | ���� Excel��C:\Users\ADMINI~1\AppData\Local\Temp\tmp9aitl6d8\COMMERCIAL_PV.xlsx��32 �Ź������
+------------------------------ Captured log call ------------------------------
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\ADMINI~1\AppData\Local\Temp\tmp9aitl6d8\COMMERCIAL_PV.xlsx��32 �Ź������
+_______________ TestSelfTest.test_selftest_values_match_engine ________________
+
+self = <test_selftest.TestSelfTest object at 0x000001D0C10BF770>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_selftest_values_match_eng0')
+
+>   ???
+E   KeyError: 'PV_STORAGE'
+
+tests\test_selftest.py:49: KeyError
+---------------------------- Captured stderr call -----------------------------
+2026-10-10 02:16:10 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:16:11 | INFO    | cenep | ���� Excel��C:\Users\ADMINI~1\AppData\Local\Temp\tmpvpsanq8e\COMMERCIAL_PV.xlsx��32 �Ź������
+------------------------------ Captured log call ------------------------------
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\ADMINI~1\AppData\Local\Temp\tmpvpsanq8e\COMMERCIAL_PV.xlsx��32 �Ź������
+____________________ TestSelfTest.test_command_line_entry _____________________
+
+self = <test_selftest.TestSelfTest object at 0x000001D0C1086F30>
+tmp_path = WindowsPath('C:/Users/Administrator/AppData/Local/Temp/pytest-of-Administrator/pytest-276/test_command_line_entry0')
+
+        assert by_type["PV_STORAGE"]["total_capex"] == result.total_capex
+        assert by_type["PV_STORAGE"]["project_npv"] == result.project_npv
+    
+>   def test_command_line_entry(self, tmp_path: Path):
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert 1 == 0
+E    +  where 1 = main(['--selftest', 'C:\\Users\\Administrator\\AppData\\Local\\Temp\\pytest-of-Administrator\\pytest-276\\test_command_line_entry0\\cli.json'])
+
+tests\test_selftest.py:56: AssertionError
+---------------------------- Captured stderr call -----------------------------
+2026-10-10 02:16:11 | INFO    | cenep.policy.tariff_plan_store | д�����õ�ۼƻ� 8 �������ù� 8 ����
+2026-10-10 02:16:12 | INFO    | cenep | ���� Excel��C:\Users\ADMINI~1\AppData\Local\Temp\tmppv12okyt\COMMERCIAL_PV.xlsx��32 �Ź������
+------------------------------ Captured log call ------------------------------
+INFO     cenep.policy.tariff_plan_store:tariff_plan_store.py:78 д�����õ�ۼƻ� 8 �������ù� 8 ����
+INFO     cenep:excel_exporter.py:2154 ���� Excel��C:\Users\ADMINI~1\AppData\Local\Temp\tmppv12okyt\COMMERCIAL_PV.xlsx��32 �Ź������
+=========================== short test summary info ===========================
+FAILED tests/test_bill_ui_report.py::TestMissingValueDisplay::test_excel_and_pdf_never_show_zero_for_missing
+FAILED tests/test_bill_ui_report.py::TestPdfBillSection::test_eighteen_sections
+FAILED tests/test_bill_ui_report.py::TestPdfBillSection::test_section_without_bills_explains_how_to_enter
+FAILED tests/test_bill_ui_report.py::TestPdfBillSection::test_section_with_bills_shows_facts_and_checks
+FAILED tests/test_bill_ui_report.py::TestPdfBillSection::test_pdf_file_generated_both_cases
+FAILED tests/test_bill_ui_report.py::TestPdfBillSection::test_section_order_keeps_bill_chapter_third
+FAILED tests/test_excel_export.py::TestWorkbookStructure::test_sheets_match_names_and_count
+FAILED tests/test_load_ui_report.py::TestPdfLoadConsumptionSection::test_story_without_analysis_still_declares_section
+FAILED tests/test_pdf_export.py::TestReportStructure::test_eighteen_sections_declared
+FAILED tests/test_pdf_export.py::TestReportStructure::test_v21_bill_section_declared
+FAILED tests/test_pdf_export.py::TestReportStructure::test_all_sections_present_in_story
+FAILED tests/test_pdf_export.py::TestFileOutput::test_suffix_appended - NameE...
+FAILED tests/test_pdf_export.py::TestFileOutput::test_dotted_name_not_truncated
+FAILED tests/test_pdf_export.py::TestDisclaimers::test_disclaimer_in_story_twice
+FAILED tests/test_pdf_export.py::TestValuesComeFromResult::test_irr_appears_in_story
+FAILED tests/test_pdf_export.py::TestPolicySection::test_without_policy - Nam...
+FAILED tests/test_pdf_export.py::TestPolicySection::test_with_policy - NameEr...
+FAILED tests/test_pdf_export.py::TestThreeProjectTypes::test_all_three_types_export[golden_pv]
+FAILED tests/test_pdf_export.py::TestThreeProjectTypes::test_all_three_types_export[golden_storage]
+FAILED tests/test_pdf_export.py::TestThreeProjectTypes::test_all_three_types_export[golden_pv_storage]
+FAILED tests/test_report_v2.py::TestExcelSheetSet::test_sheet_names_are_twenty_seven
+FAILED tests/test_report_v2.py::TestPdfSections::test_v2_project_all_sections
+FAILED tests/test_report_v2.py::TestPdfSections::test_v1_project_all_sections
+FAILED tests/test_report_v2.py::TestPdfSections::test_section_order_follows_spec
+FAILED tests/test_report_v2.py::TestPdfSections::test_v1_project_notes_timeseries_disabled
+FAILED tests/test_report_v2.py::TestPdfCharts::test_three_charts_for_v2 - Nam...
+FAILED tests/test_report_v2.py::TestPdfCharts::test_charts_placed_in_expected_sections
+FAILED tests/test_report_v2.py::TestPdfCharts::test_no_charts_when_timeseries_disabled
+FAILED tests/test_report_v2.py::TestPdfCharts::test_pdf_renders_and_stays_reasonable
+FAILED tests/test_report_v2.py::TestResultConsistency::test_both_excel_and_pdf_expose_v2_indicators
+FAILED tests/test_report_v2.py::TestResultConsistency::test_disclaimer_appears_twice_in_pdf
+FAILED tests/test_selftest.py::TestSelfTest::test_selftest_passes_and_writes_report
+FAILED tests/test_selftest.py::TestSelfTest::test_selftest_values_match_engine
+FAILED tests/test_selftest.py::TestSelfTest::test_command_line_entry - Assert...
+ERROR tests/test_load_ui_report.py::TestExcelSelfConsumptionSheet::test_values_and_calibers_written
+ERROR tests/test_load_ui_report.py::TestPdfLoadConsumptionSection::test_story_contains_metrics_and_calibers
+ERROR tests/test_load_ui_report.py::TestPdfLoadConsumptionSection::test_pdf_file_written
+ERROR tests/test_pdf_export.py::TestFileOutput::test_pdf_created - NameError:...
+ERROR tests/test_pdf_export.py::TestFileOutput::test_is_real_pdf - NameError:...
+ERROR tests/test_pdf_export.py::TestFileOutput::test_multipage - NameError: n...
+34 failed, 1636 passed, 6 errors in 405.32s (0:06:45)

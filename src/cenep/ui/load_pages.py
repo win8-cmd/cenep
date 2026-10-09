@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..application.load_profile_service import LoadProfileService
+from ..application.scenario_service import ScenarioBillService
 from ..calculation.errors import ValidationError
 from ..domain.enums import LoadEstimateSource, MissingDataPolicy
 from ..domain.load_estimate import (
@@ -91,6 +92,17 @@ def _no_edit(table: QTableWidget) -> None:
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
 
+def _text(value) -> str:
+    """把服务返回的原始值转成表格文本（``None`` → 「未提供」，不显示 0）。"""
+    if value is None:
+        return "未提供"
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, float):
+        return f"{value:,.6f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
 def _set_rows(table: QTableWidget, rows: list[list[str]], headers: list[str]) -> None:
     """把二维文本写入表格（界面只展示字符串，不做计算）。"""
     table.clear()
@@ -110,9 +122,11 @@ class LoadAnalysisPage(QWidget):
         super().__init__(parent)
         self.service: LoadProfileService | None = None
         self.project: Project | None = None
+        self.scenario_service: ScenarioBillService | None = None
         self.last_result = None
         self.last_estimate = None
         self.last_portrait = None
+        self.last_scenario = None
         self.preview = None
         self._load_path: Path | None = None
         self._pv_dataset_id: str = ""
@@ -135,6 +149,9 @@ class LoadAnalysisPage(QWidget):
         self.tabs.addTab(self._build_source_tab(), "A 数据来源")
         self.tabs.addTab(self._build_portrait_tab(), "B 负荷画像")
         self.tabs.addTab(self._build_analysis_tab(), "C 消纳分析")
+        # V2.3 §7.1 / V2.4 §8.4：D 区为光储四场景**账单**对比（阶段 6 的业务层早已就绪，
+        # 界面在此接入；**不新增标签页**，避免改变既有的主界面导航结构）
+        self.tabs.addTab(self._build_scenario_tab(), "D 光储场景对比")
 
     # ------------------------------------------------------------------ #
     # A. 数据来源
@@ -485,6 +502,163 @@ class LoadAnalysisPage(QWidget):
         return page
 
     # ------------------------------------------------------------------ #
+    # D. 光储场景对比（V2.3 §7.1、§7.6；V2.4 §8.4）
+    # ------------------------------------------------------------------ #
+    def _build_scenario_tab(self) -> QWidget:
+        """D 区：同一负荷、同一电价计划下的四场景电费对比（界面不实现任何公式）。
+
+        所有数值来自 :class:`cenep.application.scenario_service.ScenarioBillService`：
+        ``compare()`` 生成四场景与去重清单，``scenario_rows()`` / ``comparison_rows()`` /
+        ``dedup_rows()`` 只做行组装，``verify_finance_consistency()`` 校验"财务现金流里的
+        运营收益 == 去重后的唯一收益"（§7.6 第 5 条）。界面只负责显示与状态提示。
+        """
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+
+        note = QLabel(
+            "口径：四场景（无光伏 / 仅光伏 / 仅储能 / 光伏+储能）在**同一负荷、同一电价计划**下模拟；"
+            "账单节省额是**唯一**收益入口，储能套利与光伏自用只做分解展示、不再次累加（V2.3 §7.6）。"
+            "电价计划必须有核验状态；未核验计划不得用于正式结论（§4.1、§7.3）。"
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("电价计划："))
+        self.scenario_plan_combo = QComboBox(page)
+        row.addWidget(self.scenario_plan_combo, 1)
+        self.scenario_refresh_button = QPushButton("刷新电价计划", page)
+        self.scenario_refresh_button.clicked.connect(self.reload_tariff_plans)
+        row.addWidget(self.scenario_refresh_button)
+        self.scenario_run_button = QPushButton("执行四场景对比", page)
+        self.scenario_run_button.clicked.connect(self.run_scenario_compare)
+        row.addWidget(self.scenario_run_button)
+        layout.addLayout(row)
+
+        self.scenario_note_label = QLabel(
+            "尚未选择电价计划。请先点击「刷新电价计划」，再选择一套已核验的电价版本。"
+        )
+        self.scenario_note_label.setWordWrap(True)
+        layout.addWidget(self.scenario_note_label)
+
+        self.scenario_stale_label = QLabel("")
+        self.scenario_stale_label.setStyleSheet("color:#B00020; font-weight: bold;")
+        layout.addWidget(self.scenario_stale_label)
+
+        layout.addWidget(QLabel("① 四场景年度账单（口径：方案模拟，不是实际账单）", page))
+        self.scenario_table = QTableWidget(page)
+        _no_edit(self.scenario_table)
+        layout.addWidget(self.scenario_table, 2)
+
+        layout.addWidget(QLabel("② 方案 vs 基准：分项电费差额（元）", page))
+        self.comparison_table = QTableWidget(page)
+        _no_edit(self.comparison_table)
+        layout.addWidget(self.comparison_table, 2)
+
+        layout.addWidget(QLabel("③ 收益去重清单（哪些计了、哪些没计、为什么）", page))
+        self.dedup_table = QTableWidget(page)
+        _no_edit(self.dedup_table)
+        layout.addWidget(self.dedup_table, 2)
+
+        layout.addWidget(QLabel("④ 财务一致性校验与关键假设（§7.6 第 5 条）", page))
+        self.scenario_detail_view = QPlainTextEdit(page)
+        self.scenario_detail_view.setReadOnly(True)
+        layout.addWidget(self.scenario_detail_view, 1)
+        return page
+
+    def bind_scenario_service(self, service) -> None:
+        """由主窗口注入场景服务（界面不自行拼装服务，§0.2 分层）。"""
+        self.scenario_service = service
+        self.reload_tariff_plans()
+
+    def reload_tariff_plans(self) -> None:
+        """刷新电价计划下拉（只列计划与核验状态，不替用户决定用哪一套）。"""
+        combo = self.scenario_plan_combo
+        combo.clear()
+        if self.scenario_service is None:
+            self.scenario_note_label.setText(
+                "场景服务不可用：请先在「设置」中确认电价版本库（SQLite）可写。"
+            )
+            return
+        try:
+            plans = self.scenario_service.list_tariff_plans()
+        except Exception as exc:  # pragma: no cover - 版本库异常
+            self.scenario_note_label.setText(f"读取电价计划失败：{exc}")
+            return
+        for plan in plans:
+            combo.addItem(f"{plan.name}｜{plan.status.label}", plan.tariff_plan_id)
+        if plans:
+            self.scenario_note_label.setText(self.scenario_service.describe_tariff_plan(combo.currentData()))
+        else:
+            self.scenario_note_label.setText(
+                "电价版本库中没有可用计划：请在「月度账单」页载入内置计划、按账单反算或手工录入"
+                "（软件**不会**预填任何未经核验的电价，V2.3 §4.1）。"
+            )
+
+    def run_scenario_compare(self) -> None:
+        """执行四场景对比并刷新 ①②③④（全部数值来自服务，界面不做计算）。"""
+        if self.scenario_service is None or self.scenario_combo_plan_id() == "":
+            self.scenario_note_label.setStyleSheet("color:#B00020;")
+            self.scenario_note_label.setText(
+                "请先选择一套电价计划；若列表为空，请先在「月度账单」页录入或载入电价计划。"
+            )
+            return
+        try:
+            self.last_scenario = self.scenario_service.compare(self.scenario_combo_plan_id())
+        except ValidationError as exc:
+            self.scenario_note_label.setStyleSheet("color:#B00020;")
+            self.scenario_note_label.setText(f"四场景对比未执行：{exc}")
+            return
+        except Exception as exc:  # 兜底，不把英文异常抛给用户
+            self.scenario_note_label.setStyleSheet("color:#B00020;")
+            self.scenario_note_label.setText(f"四场景对比失败，请检查输入：{exc}")
+            return
+
+        result = self.last_scenario
+        self.scenario_stale_label.setText("")
+        self.scenario_note_label.setStyleSheet("color:#1B7F3B; font-weight: bold;")
+        self.scenario_note_label.setText(
+            f"电价计划：{result.tariff_plan_name}（{result.tariff_plan_status or '未标注状态'}）｜"
+            f"负荷来源：{result.load_source or '未标注'}｜"
+            f"{'实测' if result.load_is_measured else '估算（不是实测）'}｜"
+            f"时间间隔 {result.interval_minutes} 分钟 / {result.point_count} 点"
+        )
+
+        rows = ScenarioBillService.scenario_rows(result)
+        _set_rows(self.scenario_table, [[_text(c) for c in row] for row in rows[1:]], rows[0])
+        rows = ScenarioBillService.comparison_rows(result)
+        _set_rows(self.comparison_table, [[_text(c) for c in row] for row in rows[1:]], rows[0])
+        rows = ScenarioBillService.dedup_rows(result)
+        _set_rows(self.dedup_table, [[_text(c) for c in row] for row in rows[1:]], rows[0])
+
+        lines: list[str] = []
+        lines.append(f"收益去重校验：{'通过' if result.dedup_verified else '未通过'}")
+        lines.append(
+            f"唯一去重后的年度运营收益：{result.unique_annual_benefit_yuan:,.2f} 元"
+            f"（取自场景：{result.reference_scenario.label}）"
+        )
+        try:
+            ok, deviation, messages = self.scenario_service.verify_finance_consistency(result)
+            lines.append(
+                f"财务现金流一致性：{'与唯一收益一致' if ok else '不一致'}"
+                f"（偏差 {deviation:.6f} 元）"
+            )
+            for message in messages:
+                lines.append(f"· {message}")
+        except ValidationError as exc:
+            lines.append(f"财务一致性校验未执行：{exc}")
+        except Exception as exc:  # pragma: no cover - 财务引擎异常
+            lines.append(f"财务一致性校验失败：{exc}")
+        for text in (*result.warnings, *result.assumptions):
+            lines.append(f"• {text}")
+        self.scenario_detail_view.setPlainText("\n".join(lines))
+
+    def scenario_combo_plan_id(self) -> str:
+        """当前选中的电价计划编号（空字符串 = 未选择）。"""
+        data = self.scenario_plan_combo.currentData()
+        return "" if data is None else str(data)
+
+    # ------------------------------------------------------------------ #
     # 装配
     # ------------------------------------------------------------------ #
     def bind(self, project: Project, service: LoadProfileService | None = None) -> None:
@@ -494,9 +668,14 @@ class LoadAnalysisPage(QWidget):
         self.last_result = None
         self.last_estimate = None
         self.last_portrait = None
+        self.last_scenario = None
         self.preview = None
         self._load_path = None
         self._pv_dataset_id = ""
+        self.scenario_stale_label.setText("")
+        self.scenario_detail_view.setPlainText("")
+        for table in (self.scenario_table, self.comparison_table, self.dedup_table):
+            table.setRowCount(0)
         self.load_file_label.setText("尚未选择文件。")
         self.pv_file_label.setText("未选择（默认按项目光伏参数生成出力曲线）")
         self.load_sheet_combo.clear()
@@ -1034,6 +1213,11 @@ class LoadAnalysisPage(QWidget):
         """输入变更后把旧结果标记为过期（§8.4）。"""
         if self.last_result is not None or self.last_portrait is not None:
             self.stale_label.setText(STALE_TEXT)
+        # V2.3 §7.1：负荷 / 电价 / 关键参数变更后，四场景结果同样必须标记过期
+        if self.last_scenario is not None:
+            self.scenario_stale_label.setText(
+                "⚠ 输入已变更：四场景对比结果已过期，请重新执行对比（V2.4 §8.4）"
+            )
 
     def state(self) -> dict:
         """当前页面状态（供测试断言，不含计算）。"""
@@ -1053,6 +1237,17 @@ class LoadAnalysisPage(QWidget):
             "stale": bool(self.stale_label.text()),
             "metric_rows": 0 if result is None else self.metric_table.rowCount(),
             "monthly_rows": 0 if result is None else self.analysis_monthly_table.rowCount(),
+            # —— V2.3 §7.1 四场景（D 区）——
+            "scenario_plans": self.scenario_plan_combo.count(),
+            "scenario_plan_id": self.scenario_combo_plan_id(),
+            "scenario_rows": 0 if self.last_scenario is None else self.scenario_table.rowCount(),
+            "comparison_rows": 0 if self.last_scenario is None else self.comparison_table.rowCount(),
+            "dedup_rows": 0 if self.last_scenario is None else self.dedup_table.rowCount(),
+            "unique_annual_benefit": (
+                None if self.last_scenario is None else self.last_scenario.unique_annual_benefit_yuan
+            ),
+            "dedup_verified": None if self.last_scenario is None else self.last_scenario.dedup_verified,
+            "scenario_stale": bool(self.scenario_stale_label.text()),
         }
 
 

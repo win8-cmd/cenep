@@ -1,0 +1,61 @@
+﻿......................F.......FF..F..F........FF....FFFFFFF.....F....F.. [ 98%]
+.                                                                        [100%]
+================================== FAILURES ===================================
+E   AssertionError: assert '�޷��ж�' in '����� 360 �룬��ֻ�� 25.00% �����ڼ������ ��1 ���ݲ��ڣ�3 ���쳣������������'
+     +  where '����� 360 �룬��ֻ�� 25.00% �����ڼ������ ��1 ���ݲ��ڣ�3 ���쳣������������' = IntervalDetection(interval_minutes=None, resolution=None, regular=False, median_seconds=3750.0, dominant_seconds=360.0...000 �룩', '2025-01-01 02:11 �� 2025-01-01 05:49��13080.000 �룩'), note='����� 360 �룬��ֻ�� 25.00% �����ڼ������ ��1 ���ݲ��ڣ�3 ���쳣������������').note
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:257: AssertionError: assert '�޷��ж�' in '����� 360 �룬��ֻ�� 25.00% �����ڼ������ ��1 ���ݲ��ڣ�3 ���쳣������������'
+E   assert False
+     +  where False = any(<generator object TestLongTableImport.test_unsorted_timestamps_are_sorted.<locals>.<genexpr> at 0x00000131B1125F20>)
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:345: assert False
+E   cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 3600 �룬��ֻ�� 95.83% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:1150: cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 3600 �룬��ֻ�� 95.83% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+E   cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 3600 �룬��ֻ�� 95.45% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:1150: cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 3600 �룬��ֻ�� 95.45% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+E   cenep.calculation.errors.ValidationError: [load.import.align] �������Sheet1����ʱ����޷������� 30 ��������ʱ�����δ���ھ��������ϣ����ƫ�� 420.0 �룩��Ҳ�޷��������ؽ���������������ʱ���зǵ�������δ�����롣������ԭʼʱ���У����Ȱ����ݲ��뵽��������V2.2 ��6.1������δ��ȷ���Զ��ز�����
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:1915: cenep.calculation.errors.ValidationError: [load.import.align] �������Sheet1����ʱ����޷������� 30 ��������ʱ�����δ���ھ��������ϣ����ƫ�� 420.0 �룩��Ҳ�޷��������ؽ���������������ʱ���зǵ�������δ�����롣������ԭʼʱ���У����Ȱ����ݲ��뵽��������V2.2 ��6.1������δ��ȷ���Զ��ز�����
+E   TypeError: Excel does not support timezones in datetimes. The tzinfo in the datetime/time object must be set to None.
+C:\Users\Administrator\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\site-packages\openpyxl\cell\_writer.py:30: TypeError: Excel does not support timezones in datetimes. The tzinfo in the datetime/time object must be set to None.
+E   TypeError: Excel does not support timezones in datetimes. The tzinfo in the datetime/time object must be set to None.
+C:\Users\Administrator\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\Lib\site-packages\openpyxl\cell\_writer.py:30: TypeError: Excel does not support timezones in datetimes. The tzinfo in the datetime/time object must be set to None.
+E   assert 0 == 1
+     +  where 0 = len([])
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:581: assert 0 == 1
+E   KeyError: '1���õ�����'
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:605: KeyError: '1���õ�����'
+E   cenep.calculation.errors.ValidationError: [load.import.block] �ļ���wide3.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:2032: cenep.calculation.errors.ValidationError: [load.import.block] �ļ���wide3.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�
+E   cenep.calculation.errors.ValidationError: [load.import.block] �ļ���stale.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:2032: cenep.calculation.errors.ValidationError: [load.import.block] �ļ���stale.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�
+E   cenep.calculation.errors.ValidationError: [load.import.block] �ļ���trim.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:2032: cenep.calculation.errors.ValidationError: [load.import.block] �ļ���trim.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�
+E   AssertionError: assert 'ֻ�� 28 ��' in '[load.import.block] �ļ���conflict_month.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�'
+     +  where '[load.import.block] �ļ���conflict_month.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�' = str(ValidationError('�ļ���conflict_month.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�'))
+     +    where ValidationError('�ļ���conflict_month.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�') = <ExceptionInfo ValidationError('�ļ���conflict_month.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�') tblen=2>.value
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:697: AssertionError: assert 'ֻ�� 28 ��' in '[load.import.block] �ļ���conflict_month.xlsx��û���ҵ��� 2 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�'
+E   AssertionError: assert '�޷��ж���ֵ��' in '[load.import.block] �ļ���nounit.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�'
+     +  where '[load.import.block] �ļ���nounit.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�' = str(ValidationError('�ļ���nounit.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�'))
+     +    where ValidationError('�ļ���nounit.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�') = <ExceptionInfo ValidationError('�ļ���nounit.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�') tblen=2>.value
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:707: AssertionError: assert '�޷��ж���ֵ��' in '[load.import.block] �ļ���nounit.xlsx��û���ҵ��� 1 ����ʱ���� �� �����С����ݿ飻��ȷ�Ϲ������ 1 ����ʱ�̣�00:00��00:15�������ұ�ͷ��Ϊ���ڣ��������ݿ飺�ޣ�'
+E   pydantic_core._pydantic_core.ValidationError: 1 validation error for HighFrequencyLoadDataset
+      Value error, ������Դ�����˵����㸺�ɡ�����ʵ�����ݣ�estimated ����Ϊ True������������߻ᱻ���ε���ʵ������ʹ�ã�V2.2 ��0.2 ���ߣ� [type=value_error, input_value={'profile_id': 'est', 'in...y=2, is_weekend=False)]}, input_type=dict]
+        For further information visit https://errors.pydantic.dev/2.13/v/value_error
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:791: pydantic_core._pydantic_core.ValidationError: 1 validation error for HighFrequencyLoadDataset
+E   cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 900 �룬��ֻ�� 98.96% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:1150: cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 900 �룬��ֻ�� 98.96% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+=========================== short test summary info ===========================
+FAILED tests/test_load_profile_importer.py::TestIntervalDetection::test_irregular_intervals_are_not_guessed
+FAILED tests/test_load_profile_importer.py::TestLongTableImport::test_unsorted_timestamps_are_sorted
+FAILED tests/test_load_profile_importer.py::TestLongTableImport::test_duplicate_timestamps_block_import_by_default
+FAILED tests/test_load_profile_importer.py::TestLongTableImport::test_unparsable_timestamp_row_is_reported_and_excluded
+FAILED tests/test_load_profile_importer.py::TestLongTableImport::test_declared_interval_resolves_irregular_data
+FAILED tests/test_load_profile_importer.py::TestTimezone::test_aware_timestamps_are_converted_to_utc8
+FAILED tests/test_load_profile_importer.py::TestTimezone::test_dst_switch_is_detected
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_reads_blocks_and_expands_points
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_multiple_blocks_and_catalog
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_all_sheets_are_concatenated
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_stale_date_header_is_reported_and_replaced
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_trailing_empty_columns_are_trimmed
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_month_with_too_many_positive_columns_reports_error
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_block_without_unit_requires_explicit_kind
+FAILED tests/test_load_profile_importer.py::TestDatasetAndProvenance::test_estimated_dataset_is_labelled_and_scored_lower
+FAILED tests/test_load_profile_importer.py::TestQualityDeterminism::test_issue_order_and_text_are_stable

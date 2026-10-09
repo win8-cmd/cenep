@@ -1,0 +1,21 @@
+﻿........................F.........F..F..................FF.............. [ 97%]
+..                                                                       [100%]
+================================== FAILURES ===================================
+E   AssertionError: assert 0 >= 1
+     +  where 0 = IntervalDetection(interval_minutes=60, resolution=<Resolution.HOURLY: 'HOURLY'>, regular=True, median_seconds=3600.0, ...gular_ratio=1.0, irregular_count=0, irregular_samples=(), note='����� 3600 �루����ռ�� 100.00%�������� 1 ���ظ�/����ʱ������� V02/V05 ���棩').irregular_count
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:272: AssertionError: assert 0 >= 1
+E   cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 3600 �룬��ֻ�� 95.45% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:1158: cenep.calculation.errors.ValidationError: [load.import.interval] �������Sheet1�����޷��ж�ʱ���������� 3600 �룬��ֻ�� 95.45% �����ڼ������ ��1 ���ݲ��ڣ�1 ���쳣��������������ϵͳ����²����V2.2 ��6.1��������ʱ�����Ƿ�ɹ��ɣ����ڵ��������ʽָ��ʱ�����15/30/60 ���ӣ�������
+E   cenep.calculation.errors.ValidationError: [load.import.align] �������Sheet1����ʱ����޷������� 30 ��������ʱ�����δ���ھ��������ϣ����ƫ�� 420.0 �룩��Ҳ�޷��������ؽ���������������ʱ���зǵ�������δ�����롣������ԭʼʱ���У����Ȱ����ݲ��뵽��������V2.2 ��6.1������δ��ȷ���Զ��ز�����
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:1930: cenep.calculation.errors.ValidationError: [load.import.align] �������Sheet1����ʱ����޷������� 30 ��������ʱ�����δ���ھ��������ϣ����ƫ�� 420.0 �룩��Ҳ�޷��������ؽ���������������ʱ���зǵ�������δ�����롣������ԭʼʱ���У����Ȱ����ݲ��뵽��������V2.2 ��6.1������δ��ȷ���Զ��ز�����
+E   cenep.calculation.errors.ValidationError: [load.import.dates] ���ݿ顸��������������������2���õ����ݡ����� 31 �У��� 2025 �� 2 ��ֻ�� 28 �죻����� 3 �У��� 29��30��31 �У�������ֵ���޷��ж���Щ�����ڱ��£����˹��˶Թ������ɾ���������ٵ��루V2.2 ��6.4��
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\src\cenep\data\load_profile_importer.py:878: cenep.calculation.errors.ValidationError: [load.import.dates] ���ݿ顸��������������������2���õ����ݡ����� 31 �У��� 2025 �� 2 ��ֻ�� 28 �죻����� 3 �У��� 29��30��31 �У�������ֵ���޷��ж���Щ�����ڱ��£����˹��˶Թ������ɾ���������ٵ��루V2.2 ��6.4��
+E   assert False
+     +  where False = any(<generator object TestWideTableBlocks.test_trailing_empty_columns_are_trimmed.<locals>.<genexpr> at 0x0000022A41200C70>)
+C:\Users\Administrator\Documents\deepseek-harness\default-workspace\cenep\tests\test_load_profile_importer.py:687: assert False
+=========================== short test summary info ===========================
+FAILED tests/test_load_profile_importer.py::TestIntervalDetection::test_duplicate_timestamps_count_as_irregular
+FAILED tests/test_load_profile_importer.py::TestLongTableImport::test_unparsable_timestamp_row_is_reported_and_excluded
+FAILED tests/test_load_profile_importer.py::TestLongTableImport::test_declared_interval_resolves_irregular_data
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_stale_date_header_is_reported_and_replaced
+FAILED tests/test_load_profile_importer.py::TestWideTableBlocks::test_trailing_empty_columns_are_trimmed

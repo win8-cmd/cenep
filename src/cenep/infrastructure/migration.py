@@ -30,6 +30,13 @@ CALCULATION_ENGINE_VERSION = "2.0.0"
 #: 不写进项目载荷——载荷按 ``Project`` 校验且 ``extra="forbid"``。
 BILL_SECTION_SCHEMA_VERSION = "1.0"
 
+#: 负荷数据集段（``load_datasets`` / ``active_load_dataset_id``）结构版本（V2.2 §6.4、V2.4 §8.2）。
+LOAD_SECTION_SCHEMA_VERSION = "1.0"
+
+#: 四场景账单模拟段（不写进项目文件，只随结果对象传递）的结构版本（V2.3 §7.1、V2.4 §8.2）。
+#: 记录它是为了让"报告用的是哪一版场景口径"可追溯（V2.3 §7.7）。
+SCENARIO_SECTION_SCHEMA_VERSION = "1.0"
+
 #: 能够被迁移到当前版本的旧版本号
 LEGACY_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0", "1.1")
 
@@ -173,23 +180,95 @@ def ensure_bill_section(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
 
     :return: ``(载荷, 说明列表)``；载荷本就含 ``bills`` 时原样返回、说明为空。
     """
+    return ensure_sections(
+        payload,
+        (
+            (
+                "bills",
+                list,
+                "补充 V2.1 新增段 bills（显式空列表：旧项目不自动生成任何账单数据，"
+                "打开后账单页显示空状态）",
+                "已为 V2.1 账单功能补齐空 bills 段；既有参数与计算结果口径未改变。",
+            ),
+        ),
+    )
+
+
+#: 各新增段的"显式默认值 + 留痕文案"（V2.1 §8.2、V2.2 §6.4、V2.3 §7.1、V2.4 §8.2）
+#:
+#: 三元组含义：``(字段名, 默认值工厂, 迁移说明, migration_notes 文案)``。
+#: 一律"只在缺失时补齐"，**绝不覆盖**已存在的值，因此旧项目反序列化不受影响，
+#: 既有参数与计算结果口径也一字不改（V2 §1.1、V2.4 §8.2）。
+_SECTION_DEFAULTS: tuple[tuple[str, Callable[[], Any], str, str], ...] = (
+    (
+        "bills",
+        list,
+        "补充 V2.1 新增段 bills（显式空列表：旧项目不自动生成任何账单数据，打开后账单页显示空状态）",
+        "已为 V2.1 账单功能补齐空 bills 段；既有参数与计算结果口径未改变。",
+    ),
+    (
+        "load_datasets",
+        list,
+        "补充 V2.2 新增段 load_datasets（显式空列表：旧项目不自动生成任何负荷曲线，"
+        "打开后「负荷与消纳」页显示空状态）",
+        "已为 V2.2 负荷功能补齐空 load_datasets 段；既有参数与计算结果口径未改变。",
+    ),
+    (
+        "active_load_dataset_id",
+        str,
+        "补充 V2.2 新增字段 active_load_dataset_id（显式空字符串 = 未选择激活数据集）",
+        "已为 V2.2 负荷功能补齐 active_load_dataset_id 默认值（空 = 未选择）。",
+    ),
+    (
+        "scenario",
+        dict,
+        "补充 V2 新增段 scenario 的显式空对象（情景分析配置；默认值由领域模型给出）",
+        "已为情景分析配置补齐显式空段；既有情景参数未被修改。",
+    ),
+    (
+        "sensitivity",
+        dict,
+        "补充 V2 新增段 sensitivity 的显式空对象（敏感性分析配置；默认值由领域模型给出）",
+        "已为敏感性分析配置补齐显式空段；既有敏感性参数未被修改。",
+    ),
+    (
+        "parameter_registry",
+        dict,
+        "补充 V2 新增段 parameter_registry（参数来源登记；显式空对象）",
+        "已为参数来源登记补齐显式空段；未伪造任何参数来源。",
+    ),
+)
+
+
+def ensure_sections(
+    payload: dict[str, Any],
+    sections: tuple[tuple[str, Callable[[], Any], str, str], ...] = _SECTION_DEFAULTS,
+) -> tuple[dict[str, Any], list[str]]:
+    """为旧项目补齐新增段的**显式**默认值（V2.4 §8.2「新字段设置合理默认值或可空」）。
+
+    行为契约（与 :func:`ensure_bill_section` 完全一致，只是可批量处理多个段）：
+
+    * 只在字段**缺失**时补默认值；已存在（哪怕为空、为空列表、为更旧格式）一律原样保留；
+    * 每补一个段写一条 ``migration_notes``，让用户与报告都能看到"补了什么"；
+    * **不**生成任何虚构数据，**不**改动任何既有参数，**不**重算任何结果。
+
+    :return: ``(载荷, 说明列表)``；无需补齐时载荷原样返回、说明为空列表。
+    """
     out = dict(payload)
     notes: list[str] = []
-    if "bills" in out:
-        return out, notes
+    added_notes: list[str] = []
+    for field, factory, note, trail in sections:
+        if field in out:
+            continue
+        out[field] = factory()
+        notes.append(note)
+        added_notes.append(trail)
 
-    out["bills"] = []
-    notes.append(
-        "补充 V2.1 新增段 bills（显式空列表：旧项目不自动生成任何账单数据，"
-        "打开后账单页显示空状态）"
-    )
-    existing_notes = out.get("migration_notes")
-    if not isinstance(existing_notes, list):
-        existing_notes = []
-    out["migration_notes"] = [
-        *existing_notes,
-        "已为 V2.1 账单功能补齐空 bills 段；既有参数与计算结果口径未改变。",
-    ]
+    if added_notes:
+        existing_notes = out.get("migration_notes")
+        if not isinstance(existing_notes, list):
+            existing_notes = []
+        out["migration_notes"] = [*existing_notes, *added_notes]
     return out, notes
 
 
@@ -198,10 +277,13 @@ __all__ = [
     "CALCULATION_ENGINE_VERSION",
     "CURRENT_SCHEMA_VERSION",
     "LEGACY_SCHEMA_VERSIONS",
+    "LOAD_SECTION_SCHEMA_VERSION",
+    "SCENARIO_SECTION_SCHEMA_VERSION",
     "SUPPORTED_SCHEMA_VERSIONS",
     "MigrationError",
     "MigrationOutcome",
     "ensure_bill_section",
+    "ensure_sections",
     "migrate_project_payload",
     "migrate_v1_to_v2",
 ]

@@ -161,6 +161,15 @@ class MainWindow(QMainWindow):
             self.project,
             self.project_service.load_profile_service(self.project, bill_service=bills),
         )
+        # V2.3 §7.1 / V2.4 §8.4：负荷与消纳页的「D 光储场景对比」区接入场景服务；
+        # 电价版本库复用主窗口的 SQLite（与账单页/电价计划同一份，保证"选的就是用户核验过的"）。
+        self.load_page.bind_scenario_service(
+            self.project_service.scenario_bill_service(
+                self.project,
+                db=self.database,
+                load_profile_service=self.load_page.service,
+            )
+        )
         self.statusBar().showMessage(self.policy_store.startup_notice(self.project))
 
     def collect_project(self) -> tuple[Project, list[str]]:
@@ -310,6 +319,38 @@ class MainWindow(QMainWindow):
             return None, None
         return getattr(page, "last_result", None), getattr(page, "last_portrait", None)
 
+    def _load_bill_analysis_payload(self) -> tuple[list[str], object | None, object | None]:
+        """把 V2.3 的电价计划编号、基准账单校准与四场景结果交给报告层（V2.4 §8.1）。
+
+        * 电价计划编号取自「负荷与消纳 → D 光储场景对比」当前选中的计划（空则不给）；
+        * 校准汇总在**有账单且能取到电价计划**时现算一次（复用 ``TariffService``，
+          本方法不实现任何公式）；
+        * 四场景结果取自 D 区已算好的 ``last_scenario``（用户未执行时为 ``None``）。
+
+        任一步失败都只记日志并回退为"无该数据"，保证报告永远能导出（§8.2）。
+        """
+        page = getattr(self, "load_page", None)
+        scenario = getattr(page, "last_scenario", None) if page is not None else None
+        plan_id = ""
+        scenario_service = getattr(page, "scenario_service", None) if page is not None else None
+        if scenario is not None:
+            plan_id = getattr(scenario, "tariff_plan_id", "") or ""
+        elif scenario_service is not None:
+            plan_id = page.scenario_combo_plan_id() if hasattr(page, "scenario_combo_plan_id") else ""
+
+        plan_ids = [plan_id] if plan_id else []
+        calibration = None
+        if plan_id:
+            try:
+                project, errors = self.collect_project()
+                if not errors and project.bills:
+                    service = self.project_service.tariff_service(project, db=self.database)
+                    calibration = service.recompute_all(plan_id)
+            except Exception as exc:  # pragma: no cover - 报告不得因校准失败而中断
+                logger.warning("基准账单校准失败，报告将不给出复算差异结论：%s", exc)
+                calibration = None
+        return plan_ids, calibration, scenario
+
     def on_export_excel(self) -> None:
         if not self._require_result():
             return
@@ -319,6 +360,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         consumption, portrait = self._load_analysis_payload()
+        plan_ids, calibration, scenario = self._load_bill_analysis_payload()
         try:
             target = self.excel_exporter.export(
                 project,
@@ -326,6 +368,8 @@ class MainWindow(QMainWindow):
                 path,
                 self_consumption=consumption,
                 load_portrait=portrait,
+                plan_ids=plan_ids,
+                scenario_result=scenario,
             )
         except Exception as exc:  # pragma: no cover - 文件占用等
             self._show_error("导出 Excel 失败", str(exc))
@@ -342,6 +386,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         consumption, portrait = self._load_analysis_payload()
+        plan_ids, calibration, scenario = self._load_bill_analysis_payload()
         try:
             target = self.pdf_exporter.export(
                 project,
@@ -349,6 +394,9 @@ class MainWindow(QMainWindow):
                 path,
                 self_consumption=consumption,
                 load_portrait=portrait,
+                plan_ids=plan_ids,
+                calibration=calibration,
+                scenario_result=scenario,
             )
         except Exception as exc:  # pragma: no cover
             self._show_error("导出 PDF 失败", str(exc))

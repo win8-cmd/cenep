@@ -146,3 +146,26 @@ class ProjectService:
         from .load_profile_service import LoadProfileService
 
         return LoadProfileService(project, **kwargs)
+
+    # ------------------------------------------------------------------ #
+    # V2.3 阶段 6 光储场景服务装配（§7.1、§7.6；V2.4 §8.4 界面接入）
+    # ------------------------------------------------------------------ #
+    def scenario_bill_service(self, project: Project, **kwargs):
+        """返回该项目的四场景账单联动服务（V2.3 §7.1）。
+
+        同样只做**装配**：四场景生成、账单差额定分与收益去重全部在
+        :class:`cenep.application.scenario_service.ScenarioBillService` 内实现
+        （核心公式在 ``calculation/scenario_bill_engine``），界面与报告层只读结果。
+
+        :param kwargs: 透传给 ``ScenarioBillService``（如 ``db``、``store``、
+            ``load_profile_service``）
+        """
+        from .scenario_service import ScenarioBillService
+
+        return ScenarioBillService(project, **kwargs)
+
+    def tariff_service(self, project: Project, **kwargs):
+        """返回该项目的电价计划与账单复算服务（V2.3 §7.3、§7.4）。"""
+        from .tariff_service import TariffService
+
+        return TariffService(project, **kwargs)

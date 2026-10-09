@@ -19,6 +19,90 @@
 
 ---
 
+## [Unreleased] — V2.4（阶段 7：报告、迁移、性能与发布验收）
+
+> **定位**：《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 7——
+> 「完成报告新增章节和工作表；完成旧项目文件迁移和回归；执行全部测试与性能测试；
+> 在 Windows 环境验证 GUI 和打包流程；生成发布说明、已知限制、升级/回滚步骤」。
+> 对应规格书 §8.1、§8.2、§8.3、§8.4、§9.4、§11、§12。
+>
+> **状态**：**已交付并可运行**（V2.1–V2.4 的收尾阶段）。
+> 全部改动为**追加式**：既有 27 张工作表与 18 个 PDF 部分的名目、顺序与内容一字未改
+> （新增表追加在末尾；新增章节插入并顺延编号；「经济指标」与「风险」合并为一章、
+> 「免责声明」并入末章，名目与内容一项未丢）。
+> 交付清单：`V2.4_RELEASE_NOTES.md`（发布说明 / 已知限制 / 升级与回滚）、
+> `V2.4_STAGE7_REPORT.md`（§11 的 11 项过程报告）。
+>
+> **交付版本口径**：本次发布号 **V2.4**（EXE 资源 `2.4.0.0`）；
+> 程序版本 `cenep.__version__`、项目文件 `schema_version`、`CALCULATION_ENGINE_VERSION`
+> **仍为 2.0.0 / 2.0**（§0.2 冻结条款：它们是公开接口与项目文件语义）。
+
+### Added（V2.4 阶段 7 新增）
+
+- **Excel 新增 5 张工作表**（`reports/excel_exporter.py`，追加在既有 27 张之后，共 **32 张**）：
+  `月度电费分析`（逐月电量/金额/均价/跨月/重叠/质量，数据来自 `BillService.annual_summary()`）、
+  `负荷数据质量`（来源标签、覆盖率、质量等级、逐月与典型日，数据来自 `LoadPortrait`）、
+  `电价版本与来源`（`TariffService.plan_rows_for_report()` 逐项列时段电价与来源；
+  未指定计划时列出版本库摘要）、
+  `方案电费对比`（`ScenarioBillService.scenario_rows/comparison_rows/dedup_rows/dedup_manifest_rows`）、
+  `计算假设与警告`（模型与段版本、四类口径分界、假设值清单、`result.notes`、质量 issues、场景警告）。
+- **PDF 新增 6 章 / 补齐 §8.1 的 9 项内容**（`reports/pdf_exporter.py`，共 **21 部分 / 20 章**）：
+  三、数据来源与质量等级 · 五、基准账单校准（含电价机制与版本） · 八、月度电费分析 ·
+  十四、方案前后电费差额（含收益去重清单） · 十七、经济性指标与风险提示 ·
+  二十一、关键假设、未建模项与免责声明。
+- **数据口径图例**（`CALIBER_LEGEND`）：① 实际账单 / ② 软件复算 / ③ 模型估算 / ④ 方案模拟，
+  Excel 与 PDF **同源引用**；每个数据表格标题都带口径标签（§8.1「不得混为一谈」）。
+- **`SECTION_NUMERALS` / `section_title()` / 章节标题常量**：报告章节号由清单**派生**，
+  测试与自检引用常量而不再硬编码中文序号。
+- **界面 D 区「光储场景对比」**（`ui/load_pages.py`，`LoadAnalysisPage` 第 4 个子页；
+  **不新增主标签页**，主界面仍为 10 个标签）：电价计划选择、执行四场景对比、
+  三张结果表（四场景年度账单 / 分项差额 / 收益去重清单）与财务一致性文本；
+  输入变更后旧结果标记"已过期"（§8.4）。
+- **`ProjectService.scenario_bill_service()` / `tariff_service()`**：服务装配出口，
+  界面与报告不自行拼装服务（§0.2 分层）。
+- **迁移段补齐器 `ensure_sections()`**（`infrastructure/migration.py`）：为旧项目补齐
+  `bills` / `load_datasets` / `active_load_dataset_id` / `scenario` / `sensitivity` /
+  `parameter_registry` 的**显式默认值**，并写 `migration_notes` 留痕；
+  `ensure_bill_section()` 保持既有契约（对单段幂等）。
+- **段版本号**：`LOAD_SECTION_SCHEMA_VERSION`、`SCENARIO_SECTION_SCHEMA_VERSION`；
+  `.nep` 信封新增 `load_schema_version`（与既有 `bills_schema_version` 同级）。
+- **测试 3 个新文件 / 48 项**：`tests/test_v24_migration.py`（16）、
+  `tests/test_v24_scenario_ui_report.py`（14）、`tests/test_v24_report_contract.py`（18）。
+- **文档**：`V2.4_RELEASE_NOTES.md`、`V2.4_STAGE7_REPORT.md`。
+- **性能实测脚本与数据**：`build/_stage7_perf.py`、`build/stage7_perf_result.json`。
+
+### Changed（V2.4 阶段 7，均为追加式或口径澄清）
+
+- **`selftest.py`**：**移除硬编码的表数与章节数**（原 `== 27` / `== 18`），改为引用
+  `len(SHEET_NAMES)` / `len(REPORT_SECTIONS)`；新增"逐章必须真实出现在文档流"的断言；
+  报告新增 `declared_sheets` / `declared_sections` / `pdf_sections` 字段供打包验证取证。
+- **`build/version_info.txt`**：交付版本资源由 `2.0.0` 升为 **`2.4.0`**（`filevers` /
+  `ProductVersion`）；程序版本与 schema 版本未动。
+- **PDF「经济指标」「风险」两章合并**为「十七、经济性指标与风险提示」；
+  「免责声明」由独立章并入「二十一、关键假设、未建模项与免责声明」（内容逐字保留）。
+- **既有测试断言口径化**：涉及表数/章节数的断言改引用清单长度或 `section_title()` 常量
+  （`test_excel_export.py`、`test_pdf_export.py`、`test_report_v2.py`、`test_selftest.py`、
+  `test_bill_ui_report.py`、`test_load_ui_report.py`）。
+
+### Not Changed（明确声明）
+
+- **`calculation/`、`domain/`、`policy/` 下既有文件的"行为"零改动**：本次只在
+  `infrastructure/`、`reports/`、`ui/`（追加）、`tests/`、`build/` 与文档上动手。
+- **`policy/hubei_commercial.py` 的官方版与资料版电价数值未改动一个字符**（§0.2 红线）；
+  `policy/hubei.py` 的上网电价模板仍全为 `None`。
+- **既有 27 张工作表的名称、顺序与内容未改**；**既有 16 个 PDF 部分的内容未改**。
+- **未做任何 git 写操作**（无 commit / 无 push）；分支仍为 `feature/v2.1-bill-analysis`。
+
+### Fixed（V2.4 阶段 7 修复的缺陷）
+
+- `ensure_sections()` 的默认值工厂传参错误（把 `list` 当值传入，导致
+  `ensure_bill_section()` 抛 `TypeError: 'list' object is not callable`）；
+- `pdf_exporter.PdfExporter` 中**实例属性与方法同名**（`self._scenario_service = None`
+  覆盖了 `_scenario_service()` 方法），导致带场景结果的 PDF 导出抛
+  `TypeError: 'NoneType' object is not callable`；缓存改名为 `_scenario_service_obj`。
+
+---
+
 ## [Unreleased] — V2.3（阶段 5：湖北电价规则与基准账单复算）
 
 > **定位**：《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 5——

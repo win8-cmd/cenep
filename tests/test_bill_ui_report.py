@@ -41,6 +41,7 @@ from cenep.reports.pdf_exporter import (  # noqa: E402
     PdfExporter,
     _styles,
     register_cjk_font,
+    section_title,
 )
 from cenep.ui.pages import (  # noqa: E402
     BILL_EMPTY_GUIDE,
@@ -767,18 +768,22 @@ class TestExcelBillSheets:
 # 7. PDF 账单章节（有 / 无账单）
 # --------------------------------------------------------------------------- #
 class TestPdfBillSection:
-    def test_eighteen_sections(self):
-        """V2.1 §8.1 插入账单章节（17 部分）；V2.2 §6.3 再插入负荷估算与消纳章节（18 部分）。"""
-        assert len(REPORT_SECTIONS) == 18
-        assert REPORT_SECTIONS[2] == "账单事实与校验"
-        assert REPORT_SECTIONS[4] == "负荷估算与光伏消纳"
+    def test_section_count_follows_declaration(self):
+        """V2.4 §8.1：章节数与位置**引用 ``REPORT_SECTIONS``**，不硬编码。
+
+        V2.4 在「输入参数」之后插入「数据来源与质量等级」，因此账单章由第 3 章顺延为第 4 章
+        （``REPORT_SECTIONS[3]``），负荷与消纳章仍紧跟「负荷分析」之后。
+        """
+        assert len(REPORT_SECTIONS) == 21
+        assert REPORT_SECTIONS[3] == "账单事实与校验"
+        assert REPORT_SECTIONS[REPORT_SECTIONS.index("负荷分析") + 1] == "负荷估算与光伏消纳"
 
     def test_section_without_bills_explains_how_to_enter(self, project):
         assert project.bills == []
         text = _story_text(project)
         assert BILL_EMPTY_TEXT in text
         assert "录入方法" in text
-        assert "三、账单事实与校验" in text
+        assert section_title(REPORT_SECTIONS.index("账单事实与校验")) in text
         for section in REPORT_SECTIONS[1:]:
             assert section in text, f"报告缺少章节：{section}"
 
@@ -786,7 +791,7 @@ class TestPdfBillSection:
         _create(service, energy_total_kwh=None, bill_total_yuan=None)
         text = _story_text(project)
 
-        assert "三、账单事实与校验" in text
+        assert section_title(REPORT_SECTIONS.index("账单事实与校验")) in text
         assert BILL_NOT_PROVIDED_TEXT in text
         assert "月度趋势" in text
         assert "账单事实明细" in text
@@ -809,13 +814,22 @@ class TestPdfBillSection:
         assert raw.startswith(b"%PDF") and b"%%EOF" in raw[-2048:]
 
     def test_section_order_keeps_bill_chapter_third(self, project):
+        """账单章节仍是第 3 章（V2.4 §8.1 在其后插入「数据来源与质量等级」**之前**的
+        「输入参数」不变，账单章顺延为第 4 章），且全部章节严格按序出现。
+
+        章节号由 ``section_title`` 生成，**不硬编码中文序号**（V2.4 §8.1）。
+        """
         text = _story_text(project)
-        prefixes = ("一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、",
-                    "九、", "十、", "十一、", "十二、", "十三、", "十四、", "十五、",
-                    "十六、", "十七、")
-        positions = [text.find(prefix) for prefix in prefixes]
-        assert all(index >= 0 for index in positions)
+        positions = []
+        for index in range(len(REPORT_SECTIONS)):
+            title = section_title(index)
+            idx = text.find(title)
+            assert idx >= 0, f"未找到章节 {title}"
+            positions.append(idx)
         assert positions == sorted(positions)
+        assert REPORT_SECTIONS.index("账单事实与校验") == 3
+        assert section_title(3) == "四、账单事实与校验"
+        assert "四、账单事实与校验" in text
 
 
 # --------------------------------------------------------------------------- #

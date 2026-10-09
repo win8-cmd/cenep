@@ -1,25 +1,45 @@
-"""PDF 报告导出（规范 §110、§111、§148、§154；V2.1 §8.1；V2.2 §6.3）。
+"""PDF 报告导出（规范 §110、§111、§148、§154；V2.1 §8.1；V2.2 §6.3；V2.4 §8.1）。
 
-报告结构固定 18 部分：
+报告结构固定 **21 部分**：
 
-封面 / 项目概况 / 输入参数 / **账单事实与校验（V2.1 新增）** / 负荷分析 /
-**负荷估算与光伏消纳（V2.2 阶段 4 新增）** / PV时序分析 /
-储能SOC分析 / 能源流 / 电费分析 / 储能收益 / 投资 / 现金流 / 经济指标 / 方案比较 /
-敏感性 / 风险 / 参数来源 / 免责声明
+0. 封面 / 一、项目概况 / 二、输入参数 / **三、数据来源与质量等级（V2.4 新增）** /
+   **四、账单事实与校验（V2.1 新增）** / **五、基准账单校准（V2.4 新增）** /
+   六、负荷分析 / **七、负荷估算与光伏消纳（V2.2 阶段 4 新增）** /
+   **八、月度电费分析（V2.4 新增）** / 九、PV时序分析 / 十、储能SOC分析 / 十一、能源流 /
+   十二、电费分析 / 十三、储能收益 / **十四、方案前后电费差额（V2.4 新增，含收益去重清单）** /
+   十五、投资 / 十六、现金流 / **十七、经济性指标与风险提示（V2.4 新增）** / 十八、方案比较 /
+   十九、敏感性 / 二十、参数来源 / **二十一、关键假设、未建模项与免责声明（V2.4 新增）**
+
+V2.4 §8.1 的 9 项新增内容与本报告章节的对应关系：
+
+======================================  ================================================
+§8.1 要求                               本报告章节
+======================================  ================================================
+1. 数据来源与质量等级                    三、数据来源与质量等级
+2. 账单概况及月度趋势                    四、账单事实与校验（一、一）
+3. 负荷画像                              七、负荷估算与光伏消纳（一）
+4. 光伏消纳率及月度变化                  七、负荷估算与光伏消纳（三、四）
+5. 电价机制与版本                        五、基准账单校准（三）＋十四（本报告在
+                                         「基准账单校准」内列明本次采用的电价版本）
+6. 基准账单校准                          五、基准账单校准
+7. 方案前后电费差额                      十四、方案前后电费差额
+8. 经济性指标和风险提示                  十七、经济性指标与风险提示
+9. 关键假设、未建模项和免责声明          二十一、关键假设、未建模项与免责声明
+======================================  ================================================
 
 **铁律**：数据全部来自 :class:`CalculationResult`、:class:`Project`（含账单段与负荷数据集段）、
-账单服务 ``BillService`` 与负荷消纳服务 ``LoadProfileService`` **已经算好的结果**
-（本模块只接收 ``SelfConsumptionResult`` / ``LoadPortrait`` 对象，不做任何计算，
-规范 §8、§109）。因此"消纳率"与"口徑"在本模块里只能被**打印**，不能被**推导**。
+账单服务 ``BillService``、电价服务 ``TariffService``、场景服务 ``ScenarioBillService`` 与
+负荷消纳服务 ``LoadProfileService`` **已经算好的结果**
+（本模块只接收 ``SelfConsumptionResult`` / ``LoadPortrait`` / ``ScenarioBillSet`` /
+``BillCalibrationSummary`` 对象，不做任何计算，规范 §8、§109）。
+因此"消纳率"与"口徑"在本模块里只能被**打印**，不能被**推导**。
 
-「负荷估算与光伏消纳」章节的硬要求（V2.2 §0.2、§3.3、§12）：
+「报告必须区分实际账单 / 软件复算 / 模型估算 / 方案模拟，不能用同一颜色/标题混为一谈」
+（§8.1）由两处保证：
 
-* **估算与实测必须一眼可辨**：估算曲线在本章以"估算数据（不是实测）"徽标与
-  ⚠ 提示显著标注，并与实测曲线使用不同的口径说明；
-* **四项指标必须写清口径**：光伏自用率 / 负荷覆盖率 / 上网率 / 电网依赖率的
-  分子、分母、单位与边界逐条列出（口径文本来自
-  :data:`cenep.calculation.self_consumption.CALIBERS`，与界面、Excel 完全同源）；
-* 结果自带的 ``assumptions`` 逐条进入「关键假设与数据缺口」。
+* 封面之后的「数据口径图例」逐条给出四类数据的定义（文案与 Excel 的
+  :data:`cenep.reports.excel_exporter.CALIBER_LEGEND` **完全同源**）；
+* 每个数据表格的标题里都带口径标签（如「（口径：实际账单）」），且分属不同章节。
 
 中文字体：优先使用系统 TTF（微软雅黑/黑体/宋体），失败时回退到 reportlab 内置的
 ``STSong-Light``（CID 字体），再失败则回退 Helvetica（会出现乱码，但不会崩溃）。
@@ -51,37 +71,84 @@ from reportlab.platypus import (
 
 from .. import APP_NAME
 from ..application.bill_service import BillService
+from ..application.scenario_service import ScenarioBillService
+from ..application.tariff_service import TariffService
 from ..domain.bill_models import BILL_FIELD_LABELS, label_of
 from ..domain.models import Project
 from ..domain.results import CalculationResult
 from ..infrastructure.logging_setup import get_logger
+from ..infrastructure.migration import (
+    BILL_SECTION_SCHEMA_VERSION,
+    CALCULATION_ENGINE_VERSION,
+)
+from .excel_exporter import (
+    ASSUMPTION_BOUNDARY,
+    CALIBER_LEGEND,
+    CALIBER_TAG_ACTUAL,
+    CALIBER_TAG_ESTIMATED,
+    SCENARIO_COMPARE_BOUNDARY,
+    TARIFF_VERSION_HOWTO,
+)
 
 logger = get_logger()
 
 #: 报告章节顺序。V2 §66 将 V1 §110 的 15 章重组为 16 部分；
 #: V2.1 §8.1（阶段 2）在「输入参数」之后插入「账单事实与校验」；
-#: V2.2 §6.3（阶段 4）在「负荷分析」之后插入「负荷估算与光伏消纳」，
-#: 因此共 **18 部分**（既有 16 部分的名目与内容一项未丢，只是编号顺延）。
+#: V2.2 §6.3（阶段 4）在「负荷分析」之后插入「负荷估算与光伏消纳」；
+#: V2.4 §8.1（阶段 7）再插入 6 章（每章都保留既有名目与内容，只是编号顺延），
+#: 因此共 **21 部分 / 20 个正文章节**。
 REPORT_SECTIONS = [
     "项目概况",
     "输入参数",
+    "数据来源与质量等级",
     "账单事实与校验",
+    "基准账单校准",
     "负荷分析",
     "负荷估算与光伏消纳",
+    "月度电费分析",
     "PV时序分析",
     "储能SOC分析",
     "能源流",
     "电费分析",
     "储能收益",
+    "方案前后电费差额",
     "投资",
     "现金流",
-    "经济指标",
+    "经济性指标与风险提示",
     "方案比较",
     "敏感性",
-    "风险",
     "参数来源",
-    "免责声明",
+    "关键假设、未建模项与免责声明",
 ]
+
+#: 正文的章节序号（中文数字）。章节数增多时只需保证本元组长度 ≥ 章节数。
+SECTION_NUMERALS: tuple[str, ...] = (
+    "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+    "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+    "二十一", "二十二", "二十三", "二十四", "二十五",
+)
+
+
+def section_title(index: int) -> str:
+    """第 ``index`` 个正文章节的完整标题（``0`` 起）：``"三、数据来源与质量等级"``。
+
+    报告标题、测试与自检**统一引用本函数**，避免把章节号硬编码在测试里
+    （章节号会随 §8.1 追加而顺延）。
+    """
+    return f"{SECTION_NUMERALS[index]}、{REPORT_SECTIONS[index]}"
+
+
+#: 关键章节的完整标题常量（供测试与自检引用，避免硬编码中文序号）
+SECTION_DATA_QUALITY = section_title(REPORT_SECTIONS.index("数据来源与质量等级"))
+SECTION_BILL = section_title(REPORT_SECTIONS.index("账单事实与校验"))
+SECTION_CALIBRATION = section_title(REPORT_SECTIONS.index("基准账单校准"))
+SECTION_LOAD_ANALYSIS = section_title(REPORT_SECTIONS.index("负荷分析"))
+SECTION_CONSUMPTION = section_title(REPORT_SECTIONS.index("负荷估算与光伏消纳"))
+SECTION_MONTHLY_BILL = section_title(REPORT_SECTIONS.index("月度电费分析"))
+SECTION_PV_TS = section_title(REPORT_SECTIONS.index("PV时序分析"))
+SECTION_SOC = section_title(REPORT_SECTIONS.index("储能SOC分析"))
+SECTION_SCENARIO_BILL = section_title(REPORT_SECTIONS.index("方案前后电费差额"))
+SECTION_ECONOMICS = section_title(REPORT_SECTIONS.index("经济性指标与风险提示"))
 
 #: 账单字段「未提供」的统一文案（与界面 / Excel 一致，V2.1 §2.1：None ≠ 0）
 BILL_NOT_PROVIDED_TEXT = "账单未提供"
@@ -331,6 +398,57 @@ def _bill_tristate(value: bool | None) -> str:
     return "一致" if value else "超容差"
 
 
+def _pdf_cell(value: object) -> str:
+    """把结果对象里的原始值转成 PDF 单元格文本（``None`` → 「未提供」，不显示 0）。"""
+    if value is None:
+        return "未提供"
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, float):
+        return f"{value:,.6f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _calibration_summary_rows(summary) -> list[tuple[str, str]]:
+    """``BillCalibrationSummary`` 的**展示行**（数值全部来自服务，本函数只做格式化）。
+
+    与 :meth:`TariffService.calibration_rows_for_report` 的分工：那里给逐月明细表，
+    这里给年度汇总的键值行；两者都不做算术（V2.3 §7.4 第 5 条）。
+    """
+    return [
+        ("校准年度", str(summary.year)),
+        ("采用电价计划", f"{summary.tariff_plan_name or '未指定'}（{summary.tariff_plan_id or '—'}）"),
+        ("复算口径", summary.basis_label),
+        ("账单条数 / 覆盖月", f"{summary.bill_count} 条 / {len(summary.months_covered)} 个月"),
+        ("月份覆盖率", f"{summary.coverage_ratio:.2%}"),
+        ("缺失月份", "、".join(summary.missing_months) if summary.missing_months else "无"),
+        ("年度电量是否可直接相加", "是" if summary.can_sum_directly else "否（缺月 / 重叠 / 跨月 / 非自然月）"),
+        ("账单总额（实际账单）", _bill_yuan(summary.total_bill_amount_yuan)),
+        ("复算合计（仅建模部分）", _bill_yuan(summary.total_recomputed_amount_yuan)),
+        ("复算总额（含未建模基准）", _bill_yuan(summary.total_recomputed_with_baseline_yuan)),
+        ("毛差异合计", _bill_yuan(summary.total_difference_yuan)),
+        ("净差异合计（容差判定依据）", _bill_yuan(summary.total_net_difference_yuan)),
+        ("账单均价", _bill_price(summary.bill_average_price_yuan_per_kwh)),
+        ("复算均价", _bill_price(summary.recomputed_average_price_yuan_per_kwh)),
+        ("单价差（复算 − 账单）", _bill_price(summary.unit_price_difference_yuan_per_kwh)),
+        ("容差", _bill_yuan(summary.tolerance_yuan)),
+        ("通过 / 未通过条数", f"{summary.passed_bills} / {summary.failed_bills}"),
+        (
+            "是否通过账单校准",
+            "无法判断（无可用账单）"
+            if summary.calibration_passed is None
+            else ("通过" if summary.calibration_passed else "未通过——节省额不得标为高置信度（§7.4 第 6 条）"),
+        ),
+    ]
+
+
+def _plan_source_summary(plan_ids: list[str] | None) -> str:
+    """电价计划的来源摘要（供报告说明本次采用哪一版）。"""
+    if not plan_ids:
+        return ""
+    return "本次测算采用的电价计划：" + "、".join(plan_ids)
+
+
 def _pdf_metric_rows(result) -> list[list[str]]:
     """四项消纳指标的 ``[中文名, 显示值, 口径全文]``（V2.2 §3.3、§12）。
 
@@ -363,6 +481,10 @@ class PdfExporter:
         *,
         self_consumption=None,
         load_portrait=None,
+        plan_ids: list[str] | None = None,
+        calibration=None,
+        scenario_result=None,
+        as_of: datetime | None = None,
     ) -> list:
         """构造 reportlab 文档流；拆出来便于测试与复用。
 
@@ -371,9 +493,25 @@ class PdfExporter:
             **不臆造任何数值**；既有调用方（只传三个位置参数）行为完全不变。
         :param load_portrait: 可选的 :class:`cenep.calculation.load_portrait.LoadPortrait`
             （负荷画像）。为 ``None`` 时只输出消纳部分。
+        :param plan_ids: 本次测算采用的电价计划编号（V2.4 §8.1 第 5 条；``None`` 时
+            「基准账单校准」章只输出操作指引，不臆造电价版本）。
+        :param calibration: 可选的 :class:`cenep.domain.bill_recomputation.BillCalibrationSummary`
+            （V2.3 §7.4 基准账单校准结果；``None`` 时不给出"复算 vs 实际"的差异结论）。
+        :param scenario_result: 可选的 :class:`cenep.domain.scenario_bill.ScenarioBillSet`
+            （V2.3 §7.1 四场景账单对比；``None`` 时不给出方案电费差额）。
+        :param as_of: 报告生成时间（供「关键假设」章记录模型的时点；默认取当前时间）。
         """
         self._self_consumption = self_consumption
         self._load_portrait = load_portrait
+        self._plan_ids = list(plan_ids or [])
+        self._calibration = calibration
+        self._scenario_result = scenario_result
+        self._as_of = as_of
+        self._result = result
+        self._tariff_service = None
+        self._tariff_failed = False
+        self._scenario_service_obj = None
+        self._scenario_failed = False
         story: list = []
 
         # ---------- 封面 ----------
@@ -397,6 +535,25 @@ class PdfExporter:
         story.append(Paragraph(DISCLAIMER, styles["small"]))
         story.append(Spacer(1, 4 * mm))
         story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        story.append(PageBreak())
+
+        # ---------- 数据口径图例（V2.4 §8.1：四类数据不得混为一谈） ----------
+        story.append(Paragraph("数据口径图例（V2.4 §8.1）", styles["h2"]))
+        story.append(
+            self._table(
+                ["数据类别", "定义与在报告中的位置"],
+                [[name, text] for name, text in CALIBER_LEGEND],
+                styles,
+            )
+        )
+        story.append(
+            Paragraph(
+                "本报告全部表格的标题里都带上述口径标签。实际账单来自用户录入/导入；"
+                "软件复算只用于与账单比较；模型估算（月电量 + 模板生成的负荷曲线）不是实测；"
+                "方案模拟是四场景对比结果。四者不得互相替代，也不得把估算写成实测。",
+                styles["small"],
+            )
+        )
         story.append(PageBreak())
 
 
@@ -501,12 +658,17 @@ class PdfExporter:
         )
         _hours = [f"{h:02d}" for h in range(24)]
 
-        # ---------- 三、账单事实与校验（V2.1 §8.1，阶段 2 新增） ----------
+        # ---------- 三、数据来源与质量等级（V2.4 §8.1 第 1 条） ----------
+        self._sources_section(story, project, styles)
+
+        # ---------- 四、账单事实与校验（V2.1 §8.1，阶段 2 新增） ----------
         self._bill_section(story, project, styles)
 
+        # ---------- 五、基准账单校准（V2.4 §8.1 第 5、6 条；阶段 5 服务取数） ----------
+        self._calibration_section(story, project, styles)
 
-        # ---------- 四、负荷分析 ----------
-        story.append(Paragraph("四、负荷分析", styles["h1"]))
+        # ---------- 六、负荷分析 ----------
+        story.append(Paragraph(SECTION_LOAD_ANALYSIS, styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -529,11 +691,14 @@ class PdfExporter:
                 story.append(Spacer(1, 3 * mm))
                 story.append(_chart_lines("图 1  典型日（7 月 15 日）负荷与光伏出力", _hours, series))
 
-        # ---------- 五、负荷估算与光伏消纳（V2.2 §6.3 C、§3.3；阶段 4 新增） ----------
+        # ---------- 七、负荷估算与光伏消纳（V2.2 §6.3 C、§3.3；阶段 4 新增） ----------
         self._load_consumption_section(story, project, styles)
 
-        # ---------- 六、PV时序分析 ----------
-        story.append(Paragraph("六、PV时序分析", styles["h1"]))
+        # ---------- 八、月度电费分析（V2.4 §8.1 第 2 条：月度趋势与账单概况） ----------
+        self._monthly_bill_section(story, project, styles)
+
+        # ---------- 九、PV时序分析 ----------
+        story.append(Paragraph(SECTION_PV_TS, styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -571,8 +736,8 @@ class PdfExporter:
                 )
             )
 
-        # ---------- 六、储能SOC分析 ----------
-        story.append(Paragraph("七、储能SOC分析", styles["h1"]))
+        # ---------- 十、储能SOC分析 ----------
+        story.append(Paragraph(SECTION_SOC, styles["h1"]))
         # 判据用「仿真中是否真的充放过电」而不是 result.storage_energy_kwh：
         # 当项目类型为 COMMERCIAL_PV（has_storage=False）但配置了储能时，
         # 引擎的年度模型不认储能，result.storage_* 会是 0，而 V2 时序仿真实际用了储能。
@@ -608,8 +773,8 @@ class PdfExporter:
                     )
                 )
 
-        # ---------- 七、能源流 ----------
-        story.append(Paragraph("八、能源流", styles["h1"]))
+        # ---------- 十一、能源流 ----------
+        story.append(Paragraph("十一、能源流", styles["h1"]))
         bal = result.energy_balance
         if bal is None:
             story.append(Paragraph(_NO_TS, styles["body"]))
@@ -634,8 +799,8 @@ class PdfExporter:
             ]
             story.append(self._table(["能源流项目", "数值"], row_flow, styles, right_align={1}))
 
-        # ---------- 八、电费分析 ----------
-        story.append(Paragraph("九、电费分析", styles["h1"]))
+        # ---------- 十二、电费分析 ----------
+        story.append(Paragraph("十二、电费分析", styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -662,8 +827,8 @@ class PdfExporter:
                 )
             )
 
-        # ---------- 九、储能收益 ----------
-        story.append(Paragraph("十、储能收益", styles["h1"]))
+        # ---------- 十三、储能收益 ----------
+        story.append(Paragraph("十三、储能收益", styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -689,8 +854,11 @@ class PdfExporter:
             )
 
 
-        # ---------- 十、投资 ----------
-        story.append(Paragraph("十一、投资", styles["h1"]))
+        # ---------- 十四、方案前后电费差额（V2.4 §8.1 第 7 条；V2.3 §7.1、§7.6） ----------
+        self._scenario_bill_section(story, project, styles)
+
+        # ---------- 十五、投资 ----------
+        story.append(Paragraph("十五、投资", styles["h1"]))
         story.append(
             self._table(
                 ["投资项", "金额（元）"],
@@ -709,8 +877,8 @@ class PdfExporter:
         )
 
 
-        # ---------- 十一、现金流 ----------
-        story.append(Paragraph("十二、现金流", styles["h1"]))
+        # ---------- 十六、现金流 ----------
+        story.append(Paragraph("十六、现金流", styles["h1"]))
 
         story.append(Paragraph("（一）运营成本", styles["h2"]))
         first = result.annual_results[0] if result.annual_results else None
@@ -770,8 +938,10 @@ class PdfExporter:
         story.append(self._table(cash_rows[0], cash_rows[1:], styles, right_align=set(range(1, 8)), repeat=1))
 
 
-        # ---------- 十二、经济指标 ----------
-        story.append(Paragraph("十三、经济指标", styles["h1"]))
+        # ---------- 十七、经济性指标与风险提示 ----------
+        # V2.4 §8.1 第 8 条：把 V2 §66 原有的「经济指标」与「风险」两章合并为一章
+        # （名目与内容一项未丢，只是并入同一章的一/二/三小节）。
+        story.append(Paragraph(SECTION_ECONOMICS, styles["h1"]))
 
         story.append(Paragraph("（一）收益测算", styles["h2"]))
         story.append(
@@ -816,8 +986,14 @@ class PdfExporter:
         )
 
 
-        # ---------- 十三、方案比较 ----------
-        story.append(Paragraph("十四、方案比较", styles["h1"]))
+        # ---------- 经济性指标·风险提示（V2.4 §8.1 第 8 条） ----------
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("（三）风险提示", styles["h2"]))
+        story.append(Paragraph(self._risk_text(project, result), styles["body"]))
+
+
+        # ---------- 十八、方案比较 ----------
+        story.append(Paragraph("十八、方案比较", styles["h1"]))
         story.append(
             Paragraph("所有情景均自基准情景复制后施加显式乘数得到，不存在“保守→乐观”的链式推导。", styles["body"])
         )
@@ -838,8 +1014,8 @@ class PdfExporter:
         story.append(self._table(scen_rows[0], scen_rows[1:], styles, right_align={1, 2, 3, 4}))
 
 
-        # ---------- 十四、敏感性 ----------
-        story.append(Paragraph("十五、敏感性", styles["h1"]))
+        # ---------- 十九、敏感性 ----------
+        story.append(Paragraph("十九、敏感性", styles["h1"]))
         sens_rows = [["变化因素", "变化率", "项目IRR", "资本金IRR", "项目NPV(元)", "静态回收期(年)"]]
         for row in result.sensitivity:
             sens_rows.append(
@@ -857,13 +1033,8 @@ class PdfExporter:
         story.append(self._table(sens_rows[0], sens_rows[1:], styles, right_align={1, 2, 3, 4, 5}))
 
 
-        # ---------- 十五、风险 ----------
-        story.append(Paragraph("十六、风险", styles["h1"]))
-        story.append(Paragraph(self._risk_text(project, result), styles["body"]))
-
-
-        # ---------- 十六、参数来源 ----------
-        story.append(Paragraph("十七、参数来源", styles["h1"]))
+        # ---------- 二十、参数来源 ----------
+        story.append(Paragraph("二十、参数来源", styles["h1"]))
         policy = project.policy
         if policy is None:
             story.append(
@@ -897,11 +1068,11 @@ class PdfExporter:
             story.append(Paragraph(f"本测算采用政策：{policy.display_version}。", styles["body"]))
 
 
-        # ---------- 十六、参数来源·说明 ----------
-        story.append(Paragraph("（一）测算说明", styles["h2"]))
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（二）测算说明与参数来源", styles["h2"]))
         for note in result.notes:
             story.append(Paragraph(f"• {note}", styles["body"]))
-        story.append(Spacer(1, 6 * mm))
+        story.append(Spacer(1, 4 * mm))
         story.append(Paragraph("参数来源说明", styles["h2"]))
         source_rows = [["参数", "取值", "来源类型", "备注"]]
         assumptions = 0
@@ -926,13 +1097,350 @@ class PdfExporter:
                 styles["small"],
             )
         )
-        story.append(Spacer(1, 6 * mm))
-        story.append(Paragraph("十八、免责声明", styles["h1"]))
-
-        story.append(Paragraph(DISCLAIMER, styles["small"]))
-        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
+        # ---------- 二十一、关键假设、未建模项与免责声明（V2.4 §8.1 第 9 条） ----------
+        self._assumptions_section(story, project, result, styles)
 
         return story
+
+    # ------------------------------------------------------------------ #
+    # V2.4 §8.1 新增章节（阶段 7）
+    # ------------------------------------------------------------------ #
+    def _sources_section(self, story: list, project: Project, styles: dict) -> None:
+        """「数据来源与质量等级」章节（V2.4 §8.1 第 1 条）。
+
+        * 逐项列出**每一类输入数据**的来源标签与质量等级：账单事实、负荷数据集、
+          时序数据质量评分、参数来源登记；
+        * **本方法不做任何统计**：所有质量分数与等级都来自 ``BillService`` /
+          ``LoadPortrait`` / ``CalculationResult.data_quality``；
+        * 无数据时按「空状态」披露，**不臆造数值**（§8.2）。
+        """
+        story.append(Paragraph(SECTION_DATA_QUALITY, styles["h1"]))
+        bills = project.bills
+        portrait = getattr(self, "_load_portrait", None)
+        consumption = getattr(self, "_self_consumption", None)
+        result = getattr(self, "_result", None)
+        quality = result.data_quality if result is not None else None
+
+        rows: list[list[str]] = [
+            [
+                "① 账单事实（实际账单）",
+                f"{len(bills)} 条" if bills else "无（空状态）",
+                CALIBER_TAG_ACTUAL,
+                "手动录入 / Excel 导入；`None` 字段显示「账单未提供」，不按 0（V2.1 §2.1）",
+            ],
+            [
+                "② 负荷数据集",
+                f"{len(project.load_datasets)} 条"
+                + (f"（当前激活 {project.active_load_dataset_id}）" if project.active_load_dataset_id else "（未选择激活版本）"),
+                (
+                    f"{CALIBER_TAG_ESTIMATED}（不是实测）"
+                    if portrait is not None and portrait.estimated
+                    else ("实测" if portrait is not None else "空状态")
+                ),
+                "同一项目可并存实测与估算数据集，切换保留旧版本（V2.2 §6.4）",
+            ],
+            [
+                "③ 负荷数据质量（画像）",
+                portrait.quality_status.label if portrait is not None else "无负荷数据",
+                (
+                    f"{CALIBER_TAG_ESTIMATED}（不是实测）"
+                    if portrait is not None and portrait.estimated
+                    else ("实测" if portrait is not None else "—")
+                ),
+                (
+                    f"时间覆盖率 {portrait.coverage_ratio:.2%}、缺失点 {portrait.missing_value_count} 个"
+                    if portrait is not None
+                    else "尚未执行负荷画像；无数据时不提供任何消纳结论（V2.2 §6.4）"
+                ),
+            ],
+            [
+                "④ 时序数据质量评分",
+                f"{quality.score:.2f}（{quality.level_label}）" if quality is not None else "不适用",
+                "软件计算",
+                "只针对导入的负荷 / 光伏 / 电价曲线（V2 §55）；无导入数据时不评分",
+            ],
+            [
+                "⑤ 消纳分析结果来源",
+                (
+                    f"{consumption.load_source_type.label}"
+                    f"（{'估算' if consumption.is_based_on_estimate else '实测'}）"
+                    if consumption is not None
+                    else "尚未执行消纳分析"
+                ),
+                (
+                    f"{CALIBER_TAG_ESTIMATED}（不是实测）"
+                    if consumption is not None and consumption.is_based_on_estimate
+                    else ("实测" if consumption is not None else "—")
+                ),
+                "四项指标与口径见「负荷估算与光伏消纳」章（V2.2 §3.3）",
+            ],
+            [
+                "⑥ 登记参数中的假设值",
+                f"{sum(1 for meta in result.parameter_sources.values() if meta.get('is_assumption'))} 项"
+                if result is not None
+                else "—",
+                "假设值 / 系统默认",
+                "假设数据不得视为正式事实（V2 §83）；逐条清单见「二十一」章",
+            ],
+        ]
+        if not bills:
+            rows.append(
+                ["账单空状态说明", BILL_EMPTY_TEXT, CALIBER_TAG_ACTUAL, BILL_EMPTY_HOWTO]
+            )
+        story.append(
+            self._table(["数据类别", "数量 / 等级", "口径标签", "来源与限制"], rows, styles)
+        )
+        story.append(Spacer(1, 3 * mm))
+        story.append(
+            Paragraph(
+                "口径标签说明："
+                + "；".join(f"{name} —— {text}" for name, text in CALIBER_LEGEND),
+                styles["small"],
+            )
+        )
+
+    def _calibration_section(self, story: list, project: Project, styles: dict) -> None:
+        """「基准账单校准」章节（V2.4 §8.1 第 5、6 条；V2.3 §7.4）。"""
+        story.append(Paragraph(SECTION_CALIBRATION, styles["h1"]))
+        plans = self._plan_rows(project)
+        story.append(Paragraph("（一）电价机制与版本（§7.3、§4.1）", styles["h2"]))
+        if not plans:
+            story.append(
+                Paragraph(
+                    "本次报告未指定用于复算的电价计划，因此不列出各时段电价与来源。"
+                    + TARIFF_VERSION_HOWTO,
+                    styles["body"],
+                )
+            )
+        for plan_id, rows in plans:
+            story.append(Paragraph(f"电价计划：{plan_id}", styles["h2"]))
+            story.append(
+                self._table(
+                    ["字段", "取值", "单位", "来源 / 口径"],
+                    [[str(a), _pdf_cell(b), str(c), str(d)] for a, b, c, d in rows],
+                    styles,
+                )
+            )
+        story.append(Spacer(1, 3 * mm))
+
+        story.append(Paragraph("（二）基准账单校准（实际账单 vs 软件复算，§7.4）", styles["h2"]))
+        summary = self._calibration
+        if summary is None:
+            story.append(
+                Paragraph(
+                    "本次报告未附带基准账单校准结果，因此不给出「复算 vs 实际」的差异结论。"
+                    "操作路径：在电价计划选定后执行「账单复算与校准」，再导出报告。"
+                    "未通过校准的节省额不得标为高置信度（V2.3 §7.4 第 6 条）。",
+                    styles["body"],
+                )
+            )
+            story.append(Spacer(1, 2 * mm))
+            story.append(Paragraph(ASSUMPTION_BOUNDARY, styles["small"]))
+            return
+
+        message = getattr(summary, "summary_text", "") or ""
+        if message:
+            story.append(Paragraph(message, styles["body"]))
+        for name, value in _calibration_summary_rows(summary):
+            story.append(Paragraph(f"• {name}：{value}", styles["body"]))
+        rows = [list(row) for row in self._calibration_rows(project, summary)]
+        if len(rows) > 1:
+            story.append(Spacer(1, 2 * mm))
+            story.append(self._table([str(c) for c in rows[0]], rows[1:], styles, right_align={2, 3, 4, 5, 6, 7, 8, 9}))
+        for note in getattr(summary, "messages", []) or []:
+            story.append(Paragraph(f"• {note}", styles["small"]))
+        for note in getattr(summary, "assumptions", []) or []:
+            story.append(Paragraph(f"• {note}", styles["small"]))
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(ASSUMPTION_BOUNDARY, styles["small"]))
+
+    def _monthly_bill_section(self, story: list, project: Project, styles: dict) -> None:
+        """「月度电费分析」章节（V2.4 §8.1 第 2 条：账单概况及月度趋势）。"""
+        story.append(Paragraph(SECTION_MONTHLY_BILL, styles["h1"]))
+        bills = sorted(
+            project.bills,
+            key=lambda bill: (bill.billing_period_start, bill.billing_period_end, bill.meter_id or ""),
+        )
+        if not bills:
+            story.append(Paragraph(BILL_EMPTY_TEXT, styles["body"]))
+            story.append(Paragraph(BILL_EMPTY_HOWTO, styles["body"]))
+            return
+
+        service = BillService(project)
+        summary = service.annual_summary()
+        story.append(
+            self._table(
+                ["项目", "取值"],
+                [
+                    ["账单月份覆盖率", f"{summary.coverage_ratio:.2%}（{len(summary.months_covered)}/12）"],
+                    ["年度总购电量", _bill_kwh(summary.total_energy_kwh)],
+                    ["年度账单总额", _bill_yuan(summary.total_amount_yuan)],
+                    ["平均综合电价", _bill_price(summary.average_price_yuan_per_kwh)],
+                    ["可直接相加", "是" if summary.can_sum_directly else "否（存在缺月 / 重叠 / 跨月 / 非自然月账期）"],
+                    ["缺失月份", "、".join(summary.missing_months) if summary.missing_months else "无"],
+                ],
+                styles,
+            )
+        )
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（一）月度趋势（口径：实际账单）", styles["h2"]))
+        rows = [
+            [
+                item.billing_month,
+                str(item.bill_count),
+                _bill_kwh(item.energy_total_kwh),
+                _bill_yuan(item.amount_total_yuan),
+                _bill_price(item.average_price_yuan_per_kwh),
+                "是" if item.has_cross_month else "否",
+                "是" if item.has_overlap else "否",
+                item.quality_status.label,
+            ]
+            for item in summary.monthly
+        ] or [["—"] * 8]
+        story.append(
+            self._table(
+                ["月份", "账单条数", "总购电量", "账单总额", "平均综合电价", "跨月", "重叠", "质量状态"],
+                rows,
+                styles,
+                right_align={1, 2, 3, 4},
+            )
+        )
+        story.append(
+            Paragraph(
+                "口径：P_avg = 账单总额 ÷ 总购电量，仅为实际账单统计口径；"
+                "「账单未提供」的字段按未知处理，不按 0 计入合计（V2.1 §2.1、§3.1）。",
+                styles["small"],
+            )
+        )
+
+    def _scenario_bill_section(self, story: list, project: Project, styles: dict) -> None:
+        """「方案前后电费差额」章节（V2.4 §8.1 第 7 条；V2.3 §7.1、§7.5、§7.6）。"""
+        story.append(Paragraph(SECTION_SCENARIO_BILL, styles["h1"]))
+        scenario = getattr(self, "_scenario_result", None)
+        if scenario is None:
+            story.append(
+                Paragraph(
+                    "本次报告未附带光储四场景对比结果，因此不给出方案前后电费差额。"
+                    "操作路径：在「负荷与消纳」页面「D 光储场景对比」中选择电价计划并执行"
+                    "四场景对比（无光伏 / 仅光伏 / 仅储能 / 光储，V2.3 §7.1）。",
+                    styles["body"],
+                )
+            )
+            story.append(Paragraph(SCENARIO_COMPARE_BOUNDARY, styles["small"]))
+            return
+
+        story.append(
+            self._table(
+                ["项目", "取值", "来源 / 口径"],
+                [
+                    ["电价计划编号", scenario.tariff_plan_id or "未提供", "V2.3 §7.3"],
+                    ["电价计划名称（含版本）", scenario.tariff_plan_name or "未提供", "V2.3 §4.1"],
+                    ["电价来源与文号", scenario.tariff_plan_source or "未提供", "V2.3 §4.3"],
+                    ["电价核验状态", scenario.tariff_plan_status or "未提供", "draft / verified / expired"],
+                    [
+                        "负荷数据来源",
+                        scenario.load_source or "未提供",
+                        "实测" if scenario.load_is_measured else f"{CALIBER_TAG_ESTIMATED}（不是实测）",
+                    ],
+                    [
+                        "时间间隔 / 点数",
+                        f"{scenario.interval_minutes} 分钟 / {scenario.point_count} 点",
+                        "四场景共用同一时间轴",
+                    ],
+                    [
+                        "收益去重校验",
+                        "通过" if scenario.dedup_verified else "未通过",
+                        f"恒等式最大偏差 {scenario.identity_max_deviation_yuan:.6f} 元（V2.3 §7.6）",
+                    ],
+                    [
+                        "唯一去重后的年度运营收益",
+                        _fmt_money(scenario.unique_annual_benefit_yuan) + " 元",
+                        "送财务引擎的唯一数值（V2.3 §3.5）",
+                    ],
+                ],
+                styles,
+            )
+        )
+
+        for title, rows in (
+            ("（一）四场景年度账单（口径：方案模拟）", self._scenario_rows(project, scenario)),
+            ("（二）方案 vs 基准：分项差额", self._comparison_rows(project, scenario)),
+            ("（三）收益去重清单（哪些计了、哪些没计、为什么）", self._dedup_rows(project, scenario)),
+        ):
+            story.append(Spacer(1, 3 * mm))
+            story.append(Paragraph(title, styles["h2"]))
+            if not rows or len(rows) == 1:
+                story.append(Paragraph("无数据。", styles["body"]))
+                continue
+            header, *body = [[_pdf_cell(cell) for cell in row] for row in rows]
+            story.append(self._table(header, body, styles))
+        story.append(Spacer(1, 2 * mm))
+        for text in (*scenario.warnings, *scenario.assumptions):
+            story.append(Paragraph(f"• {text}", styles["small"]))
+        story.append(Paragraph(SCENARIO_COMPARE_BOUNDARY, styles["small"]))
+
+    def _assumptions_section(
+        self, story: list, project: Project, result: CalculationResult, styles: dict
+    ) -> None:
+        """「关键假设、未建模项与免责声明」章节（V2.4 §8.1 第 9 条）。"""
+        story.append(Paragraph(section_title(REPORT_SECTIONS.index("关键假设、未建模项与免责声明")), styles["h1"]))
+        assumptions = [
+            key for key, meta in result.parameter_sources.items() if meta.get("is_assumption")
+        ]
+        story.append(
+            self._table(
+                ["项目", "取值"],
+                [
+                    ["报告与模型版本", f"schema {project.schema_version} / 引擎 {CALCULATION_ENGINE_VERSION}"],
+                    ["账单段版本", BILL_SECTION_SCHEMA_VERSION],
+                    ["政策版本", project.policy.display_version if project.policy is not None else "未关联政策模板"],
+                    ["生成时间", self._as_of.isoformat(timespec="seconds") if self._as_of else datetime.now().isoformat(timespec="seconds")],
+                    ["时序仿真", "已启用" if project.timeseries.enabled else "未启用（V1 年度模式）"],
+                    ["登记参数总数 / 其中假设值", f"{len(result.parameter_sources)} / {len(assumptions)}"],
+                ],
+                styles,
+            )
+        )
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（一）假设值清单（不得视为正式事实，V2 §83）", styles["h2"]))
+        if assumptions:
+            for key in assumptions:
+                meta = result.parameter_sources[key]
+                story.append(
+                    Paragraph(
+                        f"• {key} = {meta.get('value', '')}（{meta.get('source_type_label', '')}）"
+                        f"{meta.get('note', '')}",
+                        styles["small"],
+                    )
+                )
+        else:
+            story.append(Paragraph("无标记为假设值的参数。", styles["body"]))
+
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（二）未建模项与口径限制", styles["h2"]))
+        boundary_notes = list(BILL_BOUNDARY_NOTE.split("。"))
+        for note in result.notes:
+            story.append(Paragraph(f"• {note}", styles["small"]))
+        story.append(
+            Paragraph(
+                "• 未建模项：功率因数调整与增值税按「保留账单实际值 / 显式比例假设」口径处理，"
+                "未重建其完整规则；储能容量收益、辅助服务收益与其他收益来自项目外部输入参数，"
+                "不由本软件推算（V2.3 §7.5、阶段 6 报告 §7）。",
+                styles["small"],
+            )
+        )
+        story.append(
+            Paragraph(
+                "• 未建模项：需量电价只支持单一取值；电价适配器不表达月际价格差异，"
+                "逐月价格不同时须逐月建立计划版本（V2.3 阶段 6 报告 §9 第 1、2 条）。",
+                styles["small"],
+            )
+        )
+        story.append(Paragraph(BILL_BOUNDARY_NOTE, styles["small"]))
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（三）免责声明", styles["h2"]))
+        story.append(Paragraph(DISCLAIMER, styles["small"]))
+        story.append(Paragraph(DISCLAIMER_2, styles["small"]))
 
     # ------------------------------------------------------------------ #
     # 辅助
@@ -950,7 +1458,7 @@ class PdfExporter:
         * 无结果时输出"尚未执行消纳分析"的中文说明与操作指引，**不缺章节、不报错**；
         * 分母为 0 的指标显示"不适用"，**不显示 0%**（§3.3）。
         """
-        story.append(Paragraph("五、负荷估算与光伏消纳", styles["h1"]))
+        story.append(Paragraph(SECTION_CONSUMPTION, styles["h1"]))
         result = getattr(self, "_self_consumption", None)
         portrait = getattr(self, "_load_portrait", None)
 
@@ -1121,7 +1629,7 @@ class PdfExporter:
         * 无账单时输出说明段落与录入方法，**不缺章节、不报错**（§8.2）；
         * ``None``（账单未提供）一律显示「账单未提供」，不显示 0（§2.1）。
         """
-        story.append(Paragraph("三、账单事实与校验", styles["h1"]))
+        story.append(Paragraph(SECTION_BILL, styles["h1"]))
         bills = sorted(
             project.bills,
             key=lambda bill: (bill.billing_period_start, bill.billing_period_end, bill.meter_id or ""),
@@ -1318,6 +1826,76 @@ class PdfExporter:
         story.append(Spacer(1, 2 * mm))
         story.append(Paragraph(BILL_BOUNDARY_NOTE, styles["small"]))
 
+    # ------------------------------------------------------------------ #
+    # 取值（全部来自应用服务已经算好的结果，报表层不做算术）
+    # ------------------------------------------------------------------ #
+    def _tariff(self) -> TariffService | None:
+        """电价服务（惰性构造；版本库不可用时返回 ``None``，章节照常输出说明）。
+
+        注意：缓存变量叫 ``_tariff_service``，与 :meth:`_tariff` **不同名**——
+        避免把方法名覆盖成实例属性（V2.4 阶段 7 修复过一个同类缺陷）。
+        """
+        if getattr(self, "_tariff_service", None) is None and not getattr(
+            self, "_tariff_failed", False
+        ):
+            try:
+                self._tariff_service = TariffService(Project())
+            except Exception as exc:  # pragma: no cover - 版本库异常不得阻断报告
+                logger.warning("构造电价服务失败，报告将不列出电价版本：%s", exc)
+                self._tariff_failed = True
+        return getattr(self, "_tariff_service", None)
+
+    def _plan_rows(self, project: Project) -> list[tuple[str, list[list[object]]]]:
+        """本次采用的电价计划的报告行 ``[(plan_id, rows)]``。
+
+        行数据来自 :meth:`TariffService.plan_rows_for_report`（唯一来源），
+        本方法只负责挑选计划的时机：优先用调用方传入的 ``plan_ids``。
+        """
+        ids = [plan_id for plan_id in getattr(self, "_plan_ids", []) if plan_id]
+        if not ids:
+            return []
+        service = self._tariff()
+        if service is None:
+            return []
+        out: list[tuple[str, list[list[object]]]] = []
+        for plan_id in ids[:4]:
+            try:
+                out.append((plan_id, service.plan_rows_for_report(plan_id)))
+            except Exception as exc:  # pragma: no cover - 计划被删除等
+                logger.warning("电价计划 %s 取报告行失败：%s", plan_id, exc)
+        return out
+
+    def _calibration_rows(self, project: Project, summary) -> list[list[object]]:
+        """:meth:`TariffService.calibration_rows_for_report` 的行（逐月实际 vs 复算）。"""
+        service = self._tariff()
+        if service is None:  # pragma: no cover - 见 _tariff
+            return []
+        return service.calibration_rows_for_report(summary)
+
+    def _scenario_service(self, project: Project) -> ScenarioBillService | None:
+        """场景服务（惰性构造，只用于把已算好的结果转成报告行）。"""
+        if getattr(self, "_scenario_service_obj", None) is None and not getattr(
+            self, "_scenario_failed", False
+        ):
+            try:
+                self._scenario_service_obj = ScenarioBillService(project)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("构造场景服务失败，报告将不列出场景明细：%s", exc)
+                self._scenario_failed = True
+        return getattr(self, "_scenario_service_obj", None)
+
+    def _scenario_rows(self, project: Project, scenario) -> list[list[object]]:
+        service = self._scenario_service(project)
+        return ScenarioBillService.scenario_rows(scenario) if service is not None else []
+
+    def _comparison_rows(self, project: Project, scenario) -> list[list[object]]:
+        service = self._scenario_service(project)
+        return ScenarioBillService.comparison_rows(scenario) if service is not None else []
+
+    def _dedup_rows(self, project: Project, scenario) -> list[list[object]]:
+        service = self._scenario_service(project)
+        return ScenarioBillService.dedup_rows(scenario) if service is not None else []
+
     @staticmethod
     def _risk_text(project: Project, result: CalculationResult) -> str:
         """定性风险提示（规范 §106、§143）。
@@ -1414,6 +1992,10 @@ class PdfExporter:
         *,
         self_consumption=None,
         load_portrait=None,
+        plan_ids: list[str] | None = None,
+        calibration=None,
+        scenario_result=None,
+        as_of: datetime | None = None,
     ) -> Path:
         """导出 PDF 报告，返回实际写入路径。
 
@@ -1422,6 +2004,8 @@ class PdfExporter:
 
         ``self_consumption`` / ``load_portrait`` 为 V2.2 阶段 4 追加的**可选**参数
         （来自 ``LoadProfileService``）；既有调用方不传时输出"尚未执行消纳分析"说明。
+        V2.4 阶段 7 再追加 ``plan_ids`` / ``calibration`` / ``scenario_result`` / ``as_of``
+        四个**可选**参数（既有调用方不传时行为与章节数量不变，只多出说明文字）。
         """
         target = Path(path)
         if target.suffix.lower() != ".pdf":
@@ -1447,6 +2031,10 @@ class PdfExporter:
             styles,
             self_consumption=self_consumption,
             load_portrait=load_portrait,
+            plan_ids=plan_ids,
+            calibration=calibration,
+            scenario_result=scenario_result,
+            as_of=as_of,
         )
         doc.build(story, onFirstPage=self._decorate, onLaterPages=self._decorate)
         logger.info("导出 PDF：%s", target)

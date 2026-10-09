@@ -33,8 +33,9 @@ from .migration import (
     CALCULATION_ENGINE_VERSION,
     CURRENT_SCHEMA_VERSION,
     LEGACY_SCHEMA_VERSIONS,
+    LOAD_SECTION_SCHEMA_VERSION,
     MigrationError,
-    ensure_bill_section,
+    ensure_sections,
     migrate_project_payload,
 )
 from .logging_setup import get_logger
@@ -117,6 +118,8 @@ def save_project(project: Project, path: str | Path) -> Path:
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         # V2.1 §8.2：新增数据（账单段）必须带 schema/version 版本标识
         "bills_schema_version": BILL_SECTION_SCHEMA_VERSION,
+        # V2.2 §6.4 / V2.4 §8.2：负荷数据集段同样带版本标识
+        "load_schema_version": LOAD_SECTION_SCHEMA_VERSION,
         "project": project.model_dump(mode="json"),
     }
     try:
@@ -166,10 +169,11 @@ def load_project(path: str | Path) -> Project:
             len(outcome.notes),
         )
 
-    # V2.1 §8.2：旧项目缺少账单段时补**显式空列表**（不生成任何虚构账单数据）
-    payload, bill_notes = ensure_bill_section(outcome.payload)
-    if bill_notes:
-        logger.info("项目文件补齐账单段：%s", "；".join(bill_notes))
+    # V2.1 §8.2 / V2.2 §6.4 / V2.4 §8.2：旧项目缺少新增段时补**显式默认值**
+    # （空列表 / 空字符串 / 空对象），不生成任何虚构数据、不改动任何既有字段
+    payload, section_notes = ensure_sections(outcome.payload)
+    if section_notes:
+        logger.info("项目文件补齐新增段：%s", "；".join(section_notes))
 
     try:
         return Project.model_validate(payload)
