@@ -43,6 +43,7 @@ from .pages import (
     SettingsPage,
     TimeSeriesPage,
 )
+from .load_pages import LoadAnalysisPage
 
 logger = get_logger()
 
@@ -100,6 +101,9 @@ class MainWindow(QMainWindow):
         self.result_page = ResultPage(self.tabs)
         self.timeseries_page = TimeSeriesPage(self.tabs)
         self.bills_page = BillsPage(self.tabs)  # V2.1 阶段 2：账单页（§5.4）
+        # V2.2 阶段 4：负荷与消纳分析页（§6.3）。新页面**追加**在月度账单之后
+        # （同属数据输入区），既有 9 个页面的标题与相对顺序一字未改。
+        self.load_page = LoadAnalysisPage(self.tabs)
         self.sensitivity_page = SensitivityPage(self.tabs)
         self.report_page = ReportPage(self.tabs)
         self.settings_page = SettingsPage(self.tabs)
@@ -113,6 +117,9 @@ class MainWindow(QMainWindow):
             # V2.1 §5.4「用电与电费 → 月度账单」：紧跟时序仿真（同属数据输入），
             # **既有 8 个页面的标题与相对顺序一字未改**。
             (self.bills_page, "月度账单"),
+            # V2.2 §6.3「负荷与消纳分析」：追加在数据输入区末尾，
+            # 既有 9 个页面的标题与相对顺序一字未改。
+            (self.load_page, "负荷与消纳"),
             (self.sensitivity_page, "敏感性"),
             (self.report_page, "报告"),
             (self.settings_page, "设置"),
@@ -146,7 +153,14 @@ class MainWindow(QMainWindow):
         self.result_page.clear()
         # V2.1 §5.4：账单页经 ProjectService 装配账单服务（服务里再委托计算层），
         # 界面不自行拼装、更不自己算（§0.2）。
-        self.bills_page.bind(self.project_service.bill_service(self.project))
+        bills = self.project_service.bill_service(self.project)
+        self.bills_page.bind(bills)
+        # V2.2 §6.2：负荷与消纳页同样经 ProjectService 装配服务；
+        # 账单服务复用上面同一个实例，保证"由账单电量估算负荷"读到的就是用户录入的账单。
+        self.load_page.bind(
+            self.project,
+            self.project_service.load_profile_service(self.project, bill_service=bills),
+        )
         self.statusBar().showMessage(self.policy_store.startup_notice(self.project))
 
     def collect_project(self) -> tuple[Project, list[str]]:
@@ -285,6 +299,17 @@ class MainWindow(QMainWindow):
             return False
         return True
 
+    def _load_analysis_payload(self) -> tuple[object | None, object | None]:
+        """把「负荷与消纳」页已算好的结果交给报告层（V2.2 §6.3 C）。
+
+        报告层只接收**已算好的结果对象**，不做任何计算；若用户尚未在页面上执行
+        消纳分析，则传 ``None``，报告输出"尚未执行负荷与消纳分析"的中文说明。
+        """
+        page = getattr(self, "load_page", None)
+        if page is None:
+            return None, None
+        return getattr(page, "last_result", None), getattr(page, "last_portrait", None)
+
     def on_export_excel(self) -> None:
         if not self._require_result():
             return
@@ -293,8 +318,15 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "导出 Excel", default_name, "Excel (*.xlsx)")
         if not path:
             return
+        consumption, portrait = self._load_analysis_payload()
         try:
-            target = self.excel_exporter.export(project, self.last_result, path)
+            target = self.excel_exporter.export(
+                project,
+                self.last_result,
+                path,
+                self_consumption=consumption,
+                load_portrait=portrait,
+            )
         except Exception as exc:  # pragma: no cover - 文件占用等
             self._show_error("导出 Excel 失败", str(exc))
             return
@@ -309,8 +341,15 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "导出 PDF", default_name, "PDF (*.pdf)")
         if not path:
             return
+        consumption, portrait = self._load_analysis_payload()
         try:
-            target = self.pdf_exporter.export(project, self.last_result, path)
+            target = self.pdf_exporter.export(
+                project,
+                self.last_result,
+                path,
+                self_consumption=consumption,
+                load_portrait=portrait,
+            )
         except Exception as exc:  # pragma: no cover
             self._show_error("导出 PDF 失败", str(exc))
             return

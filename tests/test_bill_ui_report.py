@@ -767,9 +767,11 @@ class TestExcelBillSheets:
 # 7. PDF 账单章节（有 / 无账单）
 # --------------------------------------------------------------------------- #
 class TestPdfBillSection:
-    def test_seventeen_sections(self):
-        assert len(REPORT_SECTIONS) == 17
+    def test_eighteen_sections(self):
+        """V2.1 §8.1 插入账单章节（17 部分）；V2.2 §6.3 再插入负荷估算与消纳章节（18 部分）。"""
+        assert len(REPORT_SECTIONS) == 18
         assert REPORT_SECTIONS[2] == "账单事实与校验"
+        assert REPORT_SECTIONS[4] == "负荷估算与光伏消纳"
 
     def test_section_without_bills_explains_how_to_enter(self, project):
         assert project.bills == []
@@ -889,7 +891,7 @@ class TestMainWindowBillFlow:
 
         window = MainWindow(db_path=tmp_path / "bills_gui.db")
         try:
-            assert window.tabs.count() == 9
+            assert window.tabs.count() == 10
             assert window.bills_page.service is not None
             window.project_page.name_edit.setText("账单界面保存测试")
             page = window.bills_page
@@ -947,7 +949,7 @@ class TestGuiStartupAndInteraction:
             assert window.isVisible()
             titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
             assert titles == [
-                "项目", "参数", "计算", "结果", "时序仿真", "月度账单",
+                "项目", "参数", "计算", "结果", "时序仿真", "月度账单", "负荷与消纳",
                 "敏感性", "报告", "设置",
             ]
             for index in range(window.tabs.count()):

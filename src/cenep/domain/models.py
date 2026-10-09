@@ -17,6 +17,7 @@ from pydantic import Field, model_validator
 
 from .base import NON_NEG, RATIO, _Model
 from .bill_models import ElectricityBill
+from .load_data import HighFrequencyLoadDataset
 from .enums import (
     DepreciationMethod,
     InvestmentMode,
@@ -462,6 +463,19 @@ class Project(_Model):
     # 注意：这里只放"账单事实"；账单**模拟结果**必须另建模型，不得混入本列表（V2.1 §0.2）。
     bills: list[ElectricityBill] = Field(
         default_factory=list, description="月电费账单事实列表（V2.1 §2.1）"
+    )
+
+    # V2.2 §6.4 负荷数据集列表（阶段 4，**仅追加字段**）。
+    # 规格书要求"对同一项目切换负荷数据集时，**保留旧数据集**并记录当前激活版本，
+    # 方便复现历史方案"。因此这里存**列表**而非单条曲线：实测高频导入与月账单估算
+    # 可以并存、可以切换，每一条都自带来源标签（LoadDataSourceType）与质量信息。
+    # 默认空列表 + 空字符串：旧项目（V1 / V2.0 / V2.1）反序列化不受影响，
+    # 新增页面显示空状态，不自动生成任何虚构数据（§8.2）。
+    load_datasets: list[HighFrequencyLoadDataset] = Field(
+        default_factory=list, description="负荷数据集（实测高频导入与月账单估算并存，V2.2 §6.4）"
+    )
+    active_load_dataset_id: str = Field(
+        default="", description="当前激活的负荷数据集 profile_id（空 = 未选择）"
     )
 
     analysis_period: int = Field(default=25, gt=0, le=40, description="项目生命周期（年，规范 §15）")

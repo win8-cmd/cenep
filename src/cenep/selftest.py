@@ -194,14 +194,15 @@ def run_selftest(output: str | None = None) -> int:
                 report["stage"] = f"{project_type.value}:verify"
                 _dump(report, output)
                 sheets = load_workbook(excel_path).sheetnames
-                assert sheets == SHEET_NAMES, "Excel 工作表不符合规范（V1 §108 / V2 §67 / V2.1 §8.1）"
+                assert sheets == SHEET_NAMES, "Excel 工作表不符合规范（V1 §108 / V2 §67 / V2.1 §8.1 / V2.2 §6.3）"
                 assert pdf_path.stat().st_size > 5000, "PDF 输出过小"
-                # V2 §66 由 15 章重组为 16 部分；V2.1 §8.1（阶段 2）再新增
-                # 「账单事实与校验」章节，共 17 部分
-                assert len(REPORT_SECTIONS) == 17
+                # V2 §66 由 15 章重组为 16 部分；V2.1 §8.1（阶段 2）新增
+                # 「账单事实与校验」；V2.2 §6.3（阶段 4）新增「负荷估算与光伏消纳」，共 18 部分
+                assert len(REPORT_SECTIONS) == 18
                 # V2 §67 工作表由 13 张扩展为 24 张；V2.1 §8.1 再新增
-                # 「账单原始数据」「账单校验」两张，共 26 张（V1 的 13 张全部保留）
-                assert len(sheets) == 26
+                # 「账单原始数据」「账单校验」；V2.2 §6.3 再新增「消纳率分析」，共 27 张
+                # （V1 的 13 张全部保留）
+                assert len(sheets) == 27
 
                 report["projects"].append(
                     {

@@ -96,9 +96,9 @@ def _collect_text(flowables) -> str:
 # 任务 A：Excel（V2 §67）
 # --------------------------------------------------------------------------- #
 class TestExcelSheetSet:
-    def test_sheet_names_are_twenty_six(self):
-        """V2.1 §8.1：V2 的 24 张 + 账单两张 = 26 张。"""
-        assert len(SHEET_NAMES) == 26
+    def test_sheet_names_are_twenty_seven(self):
+        """V2.1 §8.1：V2 的 24 张 + 账单两张 = 26 张；V2.2 §6.3 再加「消纳率分析」= 27 张。"""
+        assert len(SHEET_NAMES) == 27
 
     def test_v2_case_sheet_order(self, v2_case, tmp_path):
         project, result = v2_case
@@ -106,7 +106,7 @@ class TestExcelSheetSet:
         assert wb.sheetnames == SHEET_NAMES
 
     def test_v1_case_sheet_order(self, v1_case, tmp_path):
-        """V1 项目也必须有全部 26 张表（新增表输出占位说明）。"""
+        """V1 项目也必须有全部 27 张表（新增表输出占位说明）。"""
         project, result = v1_case
         wb = _export_excel(project, result, tmp_path / "v1.xlsx")
         assert wb.sheetnames == SHEET_NAMES
@@ -291,8 +291,8 @@ class TestPdfCharts:
                 current = item.text
             elif isinstance(item, Drawing):
                 placed[current] = placed.get(current, 0) + 1
-        # V2.1 §8.1 在「输入参数」之后插入账单章节，时序章节整体顺延一位
-        for section in ("四、负荷分析", "五、PV时序分析", "六、储能SOC分析"):
+        # V2.1 §8.1 插入账单章节、V2.2 §6.3 插入负荷估算与消纳章节，时序章节整体顺延两位
+        for section in ("四、负荷分析", "六、PV时序分析", "七、储能SOC分析"):
             assert placed.get(section, 0) >= 1, f"{section} 缺少图表"
 
     def test_no_charts_when_timeseries_disabled(self, v1_case):

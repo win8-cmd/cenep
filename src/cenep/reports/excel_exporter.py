@@ -12,8 +12,8 @@ V1 的 13 张工作表（规范 §108）：
 7. 融资参数  8. 年度现金流  9. 财务指标  10. 敏感性分析  11. 情景分析
 12. 政策依据  13. 参数来源
 
-V2 起为 **26 张**：V1 的 13 张全部保留且相对顺序不变，V2 §67 新增 11 张时序表，
-V2.1 §8.1 再新增「账单原始数据」「账单校验」两张。
+V2 起为 **27 张**：V1 的 13 张全部保留且相对顺序不变，V2 §67 新增 11 张时序表，
+V2.1 §8.1 再新增「账单原始数据」「账单校验」两张，V2.2 §6.3 再新增「消纳率分析」一张。
 """
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ logger = get_logger()
 #: V1 的 13 张（§108）**全部保留且相对顺序不变**；V2 按 §67「至少包含」新增 11 张时序相关表
 #: （储能与调度、负荷曲线、光伏曲线、分时电价、8760时序仿真、能量平衡、年度汇总、
 #: 收益分解、方案比较、方案寻优、数据质量）；V2.1 §8.1 再新增 2 张账单表
-#: （账单原始数据、账单校验），共 **26 张**。
-#: 这是 V2/V2.1 对 V1 §108 的**正当超集扩展**，不是破坏性变更：
-#: 新表在无对应数据时输出中文说明（«本项目未启用时序仿真» / «本项目尚未录入电费账单»），
-#: V1 项目与无账单项目仍可正常导出。
+#: （账单原始数据、账单校验）；V2.2 §6.3 再新增 1 张消纳分析表（消纳率分析），共 **27 张**。
+#: 这是 V2/V2.1/V2.2 对 V1 §108 的**正当超集扩展**，不是破坏性变更：
+#: 新表在无对应数据时输出中文说明（«本项目未启用时序仿真» / «本项目尚未录入电费账单» /
+#: «尚未执行负荷与消纳分析»），V1 项目、无账单项目与无负荷项目仍可正常导出。
 SHEET_NAMES = [
     # —— V1 原有（映射 V2 §67 的 Overview / Project / Base Parameters / Storage ——）
     "项目概况",
@@ -76,6 +76,8 @@ SHEET_NAMES = [
     # —— V2.1 新增（§8.1）——
     "账单原始数据",
     "账单校验",
+    # —— V2.2 阶段 4 新增（§6.3 C、§3.3）——
+    "消纳率分析",
     # —— V1 原有 ——
     "政策依据",
     "参数来源",
@@ -1384,16 +1386,142 @@ def _tristate(value: bool | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# V2.2 阶段 4：消纳率分析（§6.3 C、§3.3、§0.2）
+# --------------------------------------------------------------------------- #
+CONSUMPTION_EMPTY_TEXT = "尚未执行负荷与消纳分析。"
+CONSUMPTION_EMPTY_HOWTO = (
+    "操作路径：在「负荷与消纳」页面 A 区选择数据来源（月账单估算或实测高频负荷导入）→ "
+    "生成/导入负荷曲线 → 在 C 区点击「计算光伏消纳四项指标」→ 再导出报告。"
+)
+CONSUMPTION_EMPTY_NOTE = (
+    "在没有任何负荷数据时，本表**不提供**任何消纳率结论："
+    "不得用未经说明的默认值制造「精确结果」（V2.2 §6.4、§12）。"
+)
+
+
+def _sheet_self_consumption(wb: Workbook, self_consumption, load_portrait) -> None:
+    """「消纳率分析」表（V2.2 §6.3 C、§3.3）。
+
+    **本函数不做任何计算**：四项指标、逐月明细、口径文本与假设全部来自
+    ``LoadProfileService`` 已算好的 ``SelfConsumptionResult`` / ``LoadPortrait``；
+    唯一允许的字符串处理是格式化显示。
+
+    估算数据在本表中以「估算数据（不是实测）」徽标与独立行显著标注（§0.2 红线）。
+    """
+    ws = wb.create_sheet("消纳率分析")
+    headers = [
+        "项目",
+        "实测/估算",
+        "数值",
+        "单位",
+        "计算口径（分子 / 分母 / 单位 / 边界）",
+    ]
+    result = self_consumption
+    if result is None and load_portrait is None:
+        row = _write_title(ws, "消纳率分析（V2.2 §3.3）", len(headers))
+        ws.cell(row=row, column=1, value=CONSUMPTION_EMPTY_TEXT).font = _BOLD
+        row += 1
+        for text in (CONSUMPTION_EMPTY_HOWTO, CONSUMPTION_EMPTY_NOTE):
+            ws.cell(row=row, column=1, value=text)
+            row += 1
+        _auto_width(ws, max_width=70)
+        return
+
+    title = (
+        f"消纳率分析（V2.2 §3.3；负荷来源：{result.load_source_type.label}"
+        f"{'，估算数据' if result.is_based_on_estimate else '，实测数据'}）"
+        if result is not None
+        else "消纳率分析（仅有负荷画像，未执行消纳分析）"
+    )
+    row = _write_title(ws, title, len(headers))
+    row = _write_header_at(ws, row, headers)
+
+    source_mark = (
+        "估算（不是实测）" if result is not None and result.is_based_on_estimate else "实测"
+    )
+    data: list[list] = []
+
+    if load_portrait is not None:
+        data.append(["—— 负荷数据来源与质量（§6.3 B、§0.2）——", "", "", "", ""])
+        for name, value in load_portrait.portrait_rows():
+            data.append(
+                [name, "估算（不是实测）" if load_portrait.estimated else "实测", value, "", ""]
+            )
+        data.append(["—— 逐月电量与负荷率 ——", "", "", "", ""])
+        for item in load_portrait.monthly:
+            data.append(
+                [
+                    f"{item.month_key} 电量",
+                    source_mark,
+                    item.energy_kwh,
+                    "kWh",
+                    f"该月最大功率 {item.peak_power_kw:,.2f} kW、平均功率 "
+                    f"{item.avg_power_kw:,.2f} kW、负荷率 {item.load_factor:.2%}、"
+                    f"缺失点 {item.missing_value_count} 个",
+                ]
+            )
+
+    if result is not None:
+        data.append(["—— 电量（§3.3）——", "", "", "", ""])
+        for name, value, note in result.energy_rows():
+            data.append([name, source_mark, value, "kWh", note])
+        data.append(["—— 四项指标（含计算口径，§3.3、§12）——", "", "", "", ""])
+        for caliber in result.calibers:
+            value = result.rate_of(caliber.key)
+            data.append(
+                [
+                    caliber.name,
+                    source_mark,
+                    "不适用" if value is None else value,
+                    "比例（0~1）" if value is not None else "—",
+                    caliber.text(),
+                ]
+            )
+        data.append(["—— 逐月消纳明细（月度自用率趋势）——", "", "", "", ""])
+        for item in result.monthly:
+            data.append(
+                [
+                    f"{item.month_key} 光伏自用率",
+                    source_mark,
+                    item.self_consumption_rate if item.self_consumption_rate is not None else "不适用",
+                    "比例（0~1）" if item.self_consumption_rate is not None else "—",
+                    f"该月：负荷 {item.load_energy_kwh:,.3f} kWh、光伏 {item.pv_generation_kwh:,.3f} kWh、"
+                    f"自用 {item.pv_used_on_site_kwh:,.3f} kWh、上网 {item.pv_export_kwh:,.3f} kWh、"
+                    f"购电 {item.grid_import_kwh:,.3f} kWh；负荷覆盖率 {item.rate_text('load_coverage')}、"
+                    f"上网率 {item.rate_text('export')}、电网依赖率 {item.rate_text('grid_dependency')}",
+                ]
+            )
+        data.append(["—— 关键假设、口径与数据缺口（§0.2、§12）——", "", "", "", ""])
+        for line in result.assumption_lines():
+            data.append(["假设", source_mark, "", "", line])
+
+    row = _write_rows(ws, row, data)
+    _auto_width(ws, max_width=80)
+
+
+# --------------------------------------------------------------------------- #
 # 对外接口
 # --------------------------------------------------------------------------- #
 class ExcelExporter:
     """把 :class:`CalculationResult` 渲染为 Excel 工作簿（规范 §108、§109）。"""
 
-    def export(self, project: Project, result: CalculationResult, path: str | Path) -> Path:
+    def export(
+        self,
+        project: Project,
+        result: CalculationResult,
+        path: str | Path,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> Path:
         """导出 Excel；返回实际写入路径。
 
         后缀处理用字符串拼接而**不是** ``Path.with_suffix()``：项目名常含 ``2061.8kWp``、``V1.2`` 这类
         带小数点的片段，``with_suffix`` 会把它们当后缀截掉（``全屋面2061.8kWp`` → ``全屋面2061.xlsx``）。
+
+        ``self_consumption``（``SelfConsumptionResult``）与 ``load_portrait``（``LoadPortrait``）
+        为 V2.2 阶段 4 追加的**可选**参数；既有调用方不传时「消纳率分析」表输出
+        "尚未执行负荷与消纳分析"的中文说明，**不缺表、不报错、不臆造数值**。
         """
         target = Path(path)
         if target.suffix.lower() != ".xlsx":
@@ -1428,6 +1556,8 @@ class ExcelExporter:
         # —— V2.1 §8.1：账单事实与校验（无账单时输出说明，不缺表）——
         _sheet_bill_raw(wb, project, result)
         _sheet_bill_check(wb, project, result)
+        # —— V2.2 §6.3 C：消纳率分析（无负荷数据时输出说明，不缺表）——
+        _sheet_self_consumption(wb, self_consumption, load_portrait)
         _sheet_policy(wb, project, result)
         _sheet_sources(wb, project, result)
 

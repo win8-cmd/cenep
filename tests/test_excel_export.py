@@ -41,16 +41,26 @@ class TestWorkbookStructure:
         assert path.exists()
 
     def test_sheets_match_names_and_count(self, exported):
-        """V2 §67 + V2.1 §8.1：V1 §108 的 13 张 + V2 新增 11 张时序表 + V2.1 新增 2 张账单表 = 26 张。
+        """V2 §67 + V2.1 §8.1 + V2.2 §6.3：V1 §108 的 13 张 + V2 新增 11 张时序表
+        + V2.1 新增 2 张账单表 + V2.2 阶段 4 新增 1 张「消纳率分析」= 27 张。
 
-        这是 V2 §67「至少包含」与 V2.1 §8.1 对 V1 §108 的**正当超集扩展**：
+        这是 V2 §67「至少包含」、V2.1 §8.1 与 V2.2 §6.3 对 V1 §108 的**正当超集扩展**：
         V1 的 13 张全部保留且相对顺序不变，新增表在无对应数据时输出中文说明，
-        因此 V1 项目与无账单项目仍可正常导出（见 test_v1_project_still_exports）。
+        因此 V1 项目、无账单项目与无负荷项目仍可正常导出（见 test_v1_project_still_exports）。
         """
         _, _, path = exported
         wb = load_workbook(path)
         assert wb.sheetnames == SHEET_NAMES
-        assert len(wb.sheetnames) == 26
+        assert len(wb.sheetnames) == 27
+
+    def test_v22_self_consumption_sheet_included(self, exported):
+        """V2.2 §6.3 C：消纳率分析表必须存在；未执行消纳分析时输出中文说明。"""
+        _, _, path = exported
+        names = set(load_workbook(path).sheetnames)
+        assert "消纳率分析" in names
+        ws = load_workbook(path, data_only=True)["消纳率分析"]
+        text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value is not None)
+        assert "尚未执行负荷与消纳分析" in text
 
     def test_v21_bill_sheets_included(self, exported):
         """V2.1 §8.1：两张账单表必须存在于工作簿中（无账单时也照常生成）。"""

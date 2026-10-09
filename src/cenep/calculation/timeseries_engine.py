@@ -22,6 +22,7 @@ from datetime import date, datetime
 import numpy as np
 
 from ..domain.enums import DayType, Resolution
+from .errors import ValidationError
 
 #: ``datetime64[D].astype(int)`` 得到的 0 对应 1970-01-01，那天是**星期四**。
 #: Python 的 ``weekday()`` 约定周一 = 0，故星期 = (天数 + 3) % 7。
@@ -217,9 +218,81 @@ def annual_growth_factor(rate: float, year_index: int) -> float:
     return float((1.0 + float(rate)) ** (year_index - 1))
 
 
+def axis_from_timestamps(
+    timestamps,
+    resolution: Resolution = Resolution.HOURLY,
+    *,
+    holidays: tuple[date, ...] | list[date] = (),
+) -> TimeAxis:
+    """由**任意**时间戳序列构造 :class:`TimeAxis`（V2.2 阶段 4 追加，纯追加、不改既有行为）。
+
+    为什么需要它：:func:`build_time_axis` 只能构造"从 1 月 1 日开始的完整一年"，
+    而 V2.2 的真实负荷/光伏数据常常只覆盖部分区间（例如只有 10 个月、或起止不在年初），
+    此时既不能用整年轴（点数不符），也不该为了对齐而凭空补点。
+    本函数把给定时间戳序列的派生时间字段向量化算出来，得到的 :class:`TimeAxis`
+    与 :func:`build_time_axis` 的字段语义**逐项一致**，因此下游引擎（光伏出力、
+    储能调度、能量平衡）无需任何改动即可复用。
+
+    周几与日类型的判定与 :func:`build_time_axis` 相同（``0=周一``、周末 ``weekday >= 5``）。
+
+    :param timestamps: 时间戳序列（``datetime``），必须已按时间升序且长度 ≥ 1
+    :param resolution: 与数据实际间隔一致的分辨率（只用于 ``delta_hours`` 与展示）
+    :param holidays: 节假日日历
+    :raises ValidationError: 序列为空（中文报错）
+    """
+    stamps = list(timestamps)
+    if not stamps:
+        raise ValidationError(
+            "时间戳序列为空，无法构造时间轴；请先导入或生成负荷/光伏曲线（V2.2 §6.4）",
+            field="timeseries.axis",
+        )
+
+    n = len(stamps)
+    array = np.array([np.datetime64(t.replace(tzinfo=None)) for t in stamps], dtype="datetime64[m]")
+    day_units = array.astype("datetime64[D]")
+    hour_units = array.astype("datetime64[h]")
+
+    month = (array.astype("datetime64[M]").astype(np.int64) % 12 + 1).astype(np.int16)
+    day = (
+        day_units - day_units.astype("datetime64[M]").astype("datetime64[D]")
+    ).astype(np.int64) + 1
+    hour = (hour_units - day_units.astype("datetime64[h]")).astype(np.int64)
+    weekday = ((day_units.astype(np.int64) + _EPOCH_WEEKDAY_OFFSET) % 7).astype(np.int8)
+    is_weekend = weekday >= 5
+
+    holiday_set = {d for d in holidays}
+    if holiday_set:
+        holiday_days = np.array(
+            [np.datetime64(d.isoformat(), "D") for d in holiday_set], dtype="datetime64[D]"
+        )
+        is_holiday = np.isin(day_units, holiday_days)
+    else:
+        is_holiday = np.zeros(n, dtype=bool)
+
+    day_type = np.where(
+        is_holiday,
+        DayType.HOLIDAY.value,
+        np.where(is_weekend, DayType.WEEKEND.value, DayType.WORKDAY.value),
+    ).astype(object)
+
+    return TimeAxis(
+        year=int(stamps[0].year),
+        resolution=resolution,
+        timestamps=tuple(stamps),
+        month=month,
+        day=day.astype(np.int16),
+        hour=hour.astype(np.int8),
+        weekday=weekday,
+        is_weekend=is_weekend,
+        is_holiday=is_holiday,
+        day_type=day_type,
+    )
+
+
 __all__ = [
     "TimeAxis",
     "annual_growth_factor",
+    "axis_from_timestamps",
     "build_time_axis",
     "is_leap_year",
     "points_per_year",

@@ -39,17 +39,19 @@ def window(qapp, tmp_path: Path):
 
 
 class TestWindowStructure:
-    def test_nine_tabs(self, window):
-        """§97 + V2 §5 + V2.1 §5.4：主界面包含
-        项目/参数/计算/结果/时序仿真/月度账单/敏感性/报告/设置。
+    def test_ten_tabs(self, window):
+        """§97 + V2 §5 + V2.1 §5.4 + V2.2 §6.3：主界面包含
+        项目/参数/计算/结果/时序仿真/月度账单/负荷与消纳/敏感性/报告/设置。
 
         **V2.1 新增账单页**（「用电与电费 → 月度账单」，§5.4）：新页面插入在
-        「时序仿真」之后（同属数据输入区），既有 8 个页面的标题与相对顺序**一字未改**，
-        因此本断言是"追加一项"，不是改变既有页面的语义。
+        「时序仿真」之后（同属数据输入区），既有 8 个页面的标题与相对顺序**一字未改**。
+        **V2.2 阶段 4 新增「负荷与消纳」页**（§6.3）：追加在「月度账单」之后
+        （同属数据输入区），既有 9 个页面的标题与相对顺序**一字未改**，
+        因此本断言是"再追加一项"，不是改变既有页面的语义。
         """
         titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
         assert titles == [
-            "项目", "参数", "计算", "结果", "时序仿真", "月度账单",
+            "项目", "参数", "计算", "结果", "时序仿真", "月度账单", "负荷与消纳",
             "敏感性", "报告", "设置",
         ]
 
@@ -58,6 +60,12 @@ class TestWindowStructure:
         assert window.bills_page is not None
         assert window.bills_page.service is not None
         assert window.bills_page.service.project is window.project
+
+    def test_load_tab_registered_and_bound(self, window):
+        """V2.2 阶段 4：负荷与消纳页必须注册进主窗口并经 ProjectService 装配服务（§6.2）。"""
+        assert window.load_page is not None
+        assert window.load_page.service is not None
+        assert window.load_page.service.project is window.project
 
     def test_parameter_tabs(self, window):
         titles = [window.parameters_page.tabs.tabText(i) for i in range(window.parameters_page.tabs.count())]

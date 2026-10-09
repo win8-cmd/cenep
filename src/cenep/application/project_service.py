@@ -129,3 +129,20 @@ class ProjectService:
         from .bill_service import BillService
 
         return BillService(project, **kwargs)
+
+    # ------------------------------------------------------------------ #
+    # V2.2 阶段 4 负荷与消纳服务装配（§6.2、§6.3）
+    # ------------------------------------------------------------------ #
+    def load_profile_service(self, project: Project, **kwargs):
+        """返回该项目的负荷与消纳服务（V2.2 §6.2）。
+
+        同样只做**装配**，不复制任何负荷/消纳逻辑：数据集管理、月账单估算、
+        光伏出力解析与消纳分析全部在
+        :class:`cenep.application.load_profile_service.LoadProfileService` 内实现，
+        界面通过本方法拿到服务。
+
+        :param kwargs: 透传给 ``LoadProfileService``（如 ``project_id``、``bill_service``）
+        """
+        from .load_profile_service import LoadProfileService
+
+        return LoadProfileService(project, **kwargs)

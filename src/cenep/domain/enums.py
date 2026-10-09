@@ -751,3 +751,40 @@ class LoadQualityStatus(StrEnum):
             LoadQualityStatus.WARNING: "有警告",
             LoadQualityStatus.INVALID: "无效",
         }[self]
+
+
+# --------------------------------------------------------------------------- #
+# V2.2 §3.2、§6.5 月账单估算负荷：月电量的来源（阶段 4 新增，仅追加）
+# --------------------------------------------------------------------------- #
+# 说明：本枚举是 **V2.2 阶段 4 新增**，追加在文件末尾；未修改任何既有枚举的
+# 成员或取值，V2／V2.1 的公开接口与既有项目文件不受影响。
+# 它回答的是"这条月电量数字是怎么来的"，与 LoadDataSourceType（曲线是实测还是估算）
+# 是两个不同维度：一条 BILL 来源的月电量仍然只能生成 **估算** 曲线（§0.2 红线）。
+# --------------------------------------------------------------------------- #
+class LoadEstimateSource(StrEnum):
+    """月电量输入的来源（V2.2 §3.2、§6.5）。
+
+    * ``BILL``：取自项目已录入的月电费账单（``ElectricityBill.energy_total_kwh``）；
+    * ``MANUAL``：用户手工录入该月电量；
+    * ``ANNUAL_SPLIT``：只给年电量，按用户填写的月度比例拆分；
+    * ``UNIFORM_DEFAULT``：只给年电量且未提供月度比例，**均匀分摊**（明确的默认估算假设）。
+    """
+
+    BILL = "bill"
+    MANUAL = "manual"
+    ANNUAL_SPLIT = "annual_split"
+    UNIFORM_DEFAULT = "uniform_default"
+
+    @property
+    def label(self) -> str:
+        return {
+            LoadEstimateSource.BILL: "月电费账单",
+            LoadEstimateSource.MANUAL: "手工录入",
+            LoadEstimateSource.ANNUAL_SPLIT: "年电量按比例拆分",
+            LoadEstimateSource.UNIFORM_DEFAULT: "年电量均匀分摊（默认假设）",
+        }[self]
+
+    @property
+    def is_default_assumption(self) -> bool:
+        """是否为"没有用户信息、只能按明确默认假设"的来源（§6.5 要求显著标注）。"""
+        return self is LoadEstimateSource.UNIFORM_DEFAULT

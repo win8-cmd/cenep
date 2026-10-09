@@ -490,18 +490,187 @@ def create_range_selector() -> tuple[QWidget, QComboBox, QComboBox, QComboBox]:
     return box, mode, month, day
 
 
+# --------------------------------------------------------------------------- #
+# V2.2 阶段 4：负荷/光伏叠加曲线与月度消纳趋势（§6.3 B、§6.3 C）
+# --------------------------------------------------------------------------- #
+# 说明：这两个部件是**纯展示**组件，只做"电量 → 功率"与"小数 → 百分数"这两项
+# **显示单位换算**，不做任何消纳、经济或统计计算（口径与数值全部来自 application 层的
+# ``SelfConsumptionResult`` / 负荷数据集）。因此界面层仍然满足 V2 §61、§148 与
+# ``tests/test_gui.py`` 的"界面不得引入计算逻辑"静态扫描。
+#
+# 重要：新部件的类型常量**刻意不加入** :data:`CHART_TITLES` —— 该字典是
+# "V2 §49 时序仿真的六张图"的权威清单，``TimeSeriesPage`` 与既有测试都按它遍历建图；
+# 往里加键会让时序页去构造消纳页专用的部件（既有回归会失败）。因此这里用独立常量。
+# --------------------------------------------------------------------------- #
+CHART_LOAD_PV = "load_pv"
+CHART_MONTHLY_RATE = "monthly_rate"
+
+#: 负荷/光伏叠加曲线标题
+LOAD_PV_TITLE = "负荷与光伏叠加曲线（kW）"
+#: 月度光伏自用率趋势标题
+MONTHLY_RATE_TITLE = "月度光伏自用率趋势"
+
+
+class LoadPvChart(QWidget):
+    """负荷 / 光伏叠加曲线（V2.2 §6.3 C「光伏与负荷叠加曲线」）。
+
+    数据由调用方（页面）从 ``LoadProfileService`` 取来后写入，本部件不算任何东西；
+    唯一的换算是把**间隔电量 kWh 除以 Δt_h 得到平均功率 kW**（显示单位换算）。
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._timestamps: list = []
+        self._load_kw = np.empty(0, dtype=float)
+        self._pv_kw = np.empty(0, dtype=float)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        self.plot = pg.PlotWidget(axisItems={"bottom": pg.DateAxisItem(orientation="bottom")})
+        self.plot.setTitle(LOAD_PV_TITLE)
+        self.plot.showGrid(x=True, y=True, alpha=0.25)
+        self.plot.addLegend(offset=(8, 8))
+        self.plot.setLabel("bottom", "时间")
+        self.plot.setLabel("left", "kW")
+        layout.addWidget(self.plot, 1)
+        self.readout = QLabel("悬停查看数值；滚轮缩放、拖拽平移、右键复位")
+        self.readout.setStyleSheet("color:#555555;")
+        layout.addWidget(self.readout)
+        self.status = QLabel("")
+        self.status.setStyleSheet("color:#B00020;")
+        layout.addWidget(self.status)
+
+    def set_series(
+        self,
+        timestamps: list,
+        load_energy_kwh,
+        pv_energy_kwh,
+        interval_minutes: int,
+    ) -> None:
+        """写入两条曲线（电量 kWh → 显示用平均功率 kW）。"""
+        self.plot.clear()
+        self.plot.addLegend(offset=(8, 8))
+        self._timestamps = list(timestamps)
+        delta_hours = max(interval_minutes, 1) / 60.0
+        self._load_kw = np.asarray(load_energy_kwh, dtype=float) / delta_hours
+        self._pv_kw = np.asarray(pv_energy_kwh, dtype=float) / delta_hours
+        if not self._timestamps or self._load_kw.size == 0:
+            self.status.setText("尚未选择负荷数据集")
+            self.readout.setText("")
+            return
+        self.status.setText("")
+        x = _epoch_seconds(self._timestamps)
+        size = min(x.size, self._load_kw.size, self._pv_kw.size)
+        self.plot.plot(x[:size], self._load_kw[:size], pen=pg.mkPen("#1F77B4", width=1.2), name="负荷 kW")
+        self.plot.plot(x[:size], self._pv_kw[:size], pen=pg.mkPen("#2CA02C", width=1.2), name="光伏 kW")
+        self.plot.getPlotItem().vb.autoRange(padding=0.02)
+
+    def set_range(self, mode: str = RANGE_YEAR, month: int = 1, day: int = 1) -> None:
+        """按 ``year`` / ``month`` / ``day`` 缩放视图（数据不裁剪）。"""
+        if not self._timestamps:
+            return
+        x = _epoch_seconds(self._timestamps)
+        if mode == RANGE_YEAR:
+            self.plot.getPlotItem().vb.autoRange(padding=0.02)
+            return
+        if mode == RANGE_MONTH:
+            mask = _month_array(self._timestamps) == int(month)
+        elif mode == RANGE_DAY:
+            base = _year_of(self._timestamps)
+            target = np.datetime64(f"{base:04d}-{int(month):02d}-{int(day):02d}", "D")
+            mask = _day_array(self._timestamps) == target
+        else:
+            raise ValueError(f"未知的时间筛选粒度：{mode}")
+        idx = np.flatnonzero(mask)
+        if idx.size == 0:
+            self.plot.setXRange(0, 1, padding=0.02)
+            return
+        lo, hi = float(x[idx].min()), float(x[idx].max())
+        self.plot.setXRange(lo, hi if hi > lo else lo + 3600.0, padding=0.02)
+
+    def series_point_count(self) -> int:
+        return int(min(self._load_kw.size, self._pv_kw.size))
+
+
+class MonthlyRateChart(QWidget):
+    """月度光伏自用率趋势（V2.2 §6.3 C「月度自用率趋势」）。
+
+    数值直接来自 ``SelfConsumptionResult.monthly``（分母为 0 的月份显示"不适用"，
+    不画点），本部件不做任何比例计算。
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        self.plot = pg.PlotWidget()
+        self.plot.setTitle(MONTHLY_RATE_TITLE)
+        self.plot.showGrid(y=True, alpha=0.25)
+        self.plot.setLabel("bottom", "月份（1–12）")
+        self.plot.setLabel("left", "自用率 %")
+        layout.addWidget(self.plot, 1)
+        self.status = QLabel("")
+        self.status.setStyleSheet("color:#B00020;")
+        layout.addWidget(self.status)
+        self._months: list[int] = []
+        self._rates: np.ndarray = np.empty(0, dtype=float)
+
+    def set_rows(self, monthly_rows) -> None:
+        """写入逐月行（``MonthlySelfConsumptionRow`` 列表）。"""
+        self.plot.clear()
+        months: list[int] = []
+        rates: list[float] = []
+        for row in monthly_rows or []:
+            rate = getattr(row, "self_consumption_rate", None)
+            if rate is None:
+                continue
+            months.append(int(row.month))
+            rates.append(float(rate) * 100.0)
+        self._months = months
+        self._rates = np.asarray(rates, dtype=float)
+        if not months:
+            self.status.setText("无可用月度自用率（光伏发电量为 0 的月份显示为「不适用」）")
+            return
+        self.status.setText("")
+        self.plot.plot(
+            np.asarray(months, dtype=float),
+            self._rates,
+            pen=pg.mkPen("#2CA02C", width=1.4),
+            symbol="o",
+            symbolSize=8,
+            symbolBrush="#2CA02C",
+        )
+        for month, rate in zip(months, rates):
+            text = pg.TextItem(f"{rate:.1f}%", anchor=(0.5, 1.4), color="#333333")
+            text.setPos(float(month), float(rate))
+            self.plot.addItem(text)
+        self.plot.getPlotItem().vb.autoRange(padding=0.12)
+
+    def month_count(self) -> int:
+        return len(self._months)
+
+    def rate_values(self) -> np.ndarray:
+        return self._rates
+
+
 __all__ = [
     "CHART_LOAD",
+    "CHART_LOAD_PV",
+    "CHART_MONTHLY_RATE",
     "CHART_PRICE",
     "CHART_PV",
     "CHART_SCENARIO",
     "CHART_SOC",
     "CHART_TITLES",
     "CHART_TYPICAL_DAY",
+    "LOAD_PV_TITLE",
+    "MONTHLY_RATE_TITLE",
     "RANGE_DAY",
     "RANGE_LABELS",
     "RANGE_MONTH",
     "RANGE_YEAR",
+    "LoadPvChart",
+    "MonthlyRateChart",
     "ScenarioBarChart",
     "TimeSeriesChart",
     "create_chart",

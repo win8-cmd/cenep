@@ -1,13 +1,25 @@
-"""PDF 报告导出（规范 §110、§111、§148、§154；V2.1 §8.1）。
+"""PDF 报告导出（规范 §110、§111、§148、§154；V2.1 §8.1；V2.2 §6.3）。
 
-报告结构固定 17 部分：
+报告结构固定 18 部分：
 
-封面 / 项目概况 / 输入参数 / **账单事实与校验（V2.1 新增）** / 负荷分析 / PV时序分析 /
+封面 / 项目概况 / 输入参数 / **账单事实与校验（V2.1 新增）** / 负荷分析 /
+**负荷估算与光伏消纳（V2.2 阶段 4 新增）** / PV时序分析 /
 储能SOC分析 / 能源流 / 电费分析 / 储能收益 / 投资 / 现金流 / 经济指标 / 方案比较 /
 敏感性 / 风险 / 参数来源 / 免责声明
 
-**铁律**：数据全部来自 :class:`CalculationResult`、:class:`Project`（含账单段）
-与账单服务 ``BillService`` 已算好的核对结果，本模块不做任何计算（规范 §8、§109）。
+**铁律**：数据全部来自 :class:`CalculationResult`、:class:`Project`（含账单段与负荷数据集段）、
+账单服务 ``BillService`` 与负荷消纳服务 ``LoadProfileService`` **已经算好的结果**
+（本模块只接收 ``SelfConsumptionResult`` / ``LoadPortrait`` 对象，不做任何计算，
+规范 §8、§109）。因此"消纳率"与"口徑"在本模块里只能被**打印**，不能被**推导**。
+
+「负荷估算与光伏消纳」章节的硬要求（V2.2 §0.2、§3.3、§12）：
+
+* **估算与实测必须一眼可辨**：估算曲线在本章以"估算数据（不是实测）"徽标与
+  ⚠ 提示显著标注，并与实测曲线使用不同的口径说明；
+* **四项指标必须写清口径**：光伏自用率 / 负荷覆盖率 / 上网率 / 电网依赖率的
+  分子、分母、单位与边界逐条列出（口径文本来自
+  :data:`cenep.calculation.self_consumption.CALIBERS`，与界面、Excel 完全同源）；
+* 结果自带的 ``assumptions`` 逐条进入「关键假设与数据缺口」。
 
 中文字体：优先使用系统 TTF（微软雅黑/黑体/宋体），失败时回退到 reportlab 内置的
 ``STSong-Light``（CID 字体），再失败则回退 Helvetica（会出现乱码，但不会崩溃）。
@@ -47,13 +59,15 @@ from ..infrastructure.logging_setup import get_logger
 logger = get_logger()
 
 #: 报告章节顺序。V2 §66 将 V1 §110 的 15 章重组为 16 部分；
-#: V2.1 §8.1（阶段 2）在「输入参数」之后插入「账单事实与校验」，
-#: 因此共 **17 部分**（既有 16 部分的名目与内容一项未丢，只是编号顺延）。
+#: V2.1 §8.1（阶段 2）在「输入参数」之后插入「账单事实与校验」；
+#: V2.2 §6.3（阶段 4）在「负荷分析」之后插入「负荷估算与光伏消纳」，
+#: 因此共 **18 部分**（既有 16 部分的名目与内容一项未丢，只是编号顺延）。
 REPORT_SECTIONS = [
     "项目概况",
     "输入参数",
     "账单事实与校验",
     "负荷分析",
+    "负荷估算与光伏消纳",
     "PV时序分析",
     "储能SOC分析",
     "能源流",
@@ -317,11 +331,49 @@ def _bill_tristate(value: bool | None) -> str:
     return "一致" if value else "超容差"
 
 
+def _pdf_metric_rows(result) -> list[list[str]]:
+    """四项消纳指标的 ``[中文名, 显示值, 口径全文]``（V2.2 §3.3、§12）。
+
+    口径全文与界面、Excel 完全同源（都来自
+    :data:`cenep.calculation.self_consumption.CALIBERS`），
+    因此报告里的"消纳率"永远带着它的分子与分母，不会被读成另一种口径。
+    分母为 0 时显示"不适用"，**不显示 0%**（§3.3）。
+    """
+    rows: list[list[str]] = []
+    for caliber in result.calibers:
+        value = result.rate_of(caliber.key)
+        rows.append(
+            [
+                caliber.name,
+                "不适用" if value is None else f"{value:.2%}",
+                caliber.text(),
+            ]
+        )
+    return rows
+
+
 class PdfExporter:
     """把 :class:`CalculationResult` 渲染为 PDF 报告（规范 §110）。"""
 
-    def build_story(self, project: Project, result: CalculationResult, styles: dict) -> list:
-        """构造 reportlab 文档流；拆出来便于测试与复用。"""
+    def build_story(
+        self,
+        project: Project,
+        result: CalculationResult,
+        styles: dict,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> list:
+        """构造 reportlab 文档流；拆出来便于测试与复用。
+
+        :param self_consumption: 可选的 :class:`cenep.domain.self_consumption_result.SelfConsumptionResult`
+            （V2.2 阶段 4）。为 ``None`` 时本章输出"尚未执行消纳分析"的中文说明，
+            **不臆造任何数值**；既有调用方（只传三个位置参数）行为完全不变。
+        :param load_portrait: 可选的 :class:`cenep.calculation.load_portrait.LoadPortrait`
+            （负荷画像）。为 ``None`` 时只输出消纳部分。
+        """
+        self._self_consumption = self_consumption
+        self._load_portrait = load_portrait
         story: list = []
 
         # ---------- 封面 ----------
@@ -477,8 +529,11 @@ class PdfExporter:
                 story.append(Spacer(1, 3 * mm))
                 story.append(_chart_lines("图 1  典型日（7 月 15 日）负荷与光伏出力", _hours, series))
 
-        # ---------- 五、PV时序分析 ----------
-        story.append(Paragraph("五、PV时序分析", styles["h1"]))
+        # ---------- 五、负荷估算与光伏消纳（V2.2 §6.3 C、§3.3；阶段 4 新增） ----------
+        self._load_consumption_section(story, project, styles)
+
+        # ---------- 六、PV时序分析 ----------
+        story.append(Paragraph("六、PV时序分析", styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -517,7 +572,7 @@ class PdfExporter:
             )
 
         # ---------- 六、储能SOC分析 ----------
-        story.append(Paragraph("六、储能SOC分析", styles["h1"]))
+        story.append(Paragraph("七、储能SOC分析", styles["h1"]))
         # 判据用「仿真中是否真的充放过电」而不是 result.storage_energy_kwh：
         # 当项目类型为 COMMERCIAL_PV（has_storage=False）但配置了储能时，
         # 引擎的年度模型不认储能，result.storage_* 会是 0，而 V2 时序仿真实际用了储能。
@@ -554,7 +609,7 @@ class PdfExporter:
                 )
 
         # ---------- 七、能源流 ----------
-        story.append(Paragraph("七、能源流", styles["h1"]))
+        story.append(Paragraph("八、能源流", styles["h1"]))
         bal = result.energy_balance
         if bal is None:
             story.append(Paragraph(_NO_TS, styles["body"]))
@@ -580,7 +635,7 @@ class PdfExporter:
             story.append(self._table(["能源流项目", "数值"], row_flow, styles, right_align={1}))
 
         # ---------- 八、电费分析 ----------
-        story.append(Paragraph("八、电费分析", styles["h1"]))
+        story.append(Paragraph("九、电费分析", styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -608,7 +663,7 @@ class PdfExporter:
             )
 
         # ---------- 九、储能收益 ----------
-        story.append(Paragraph("九、储能收益", styles["h1"]))
+        story.append(Paragraph("十、储能收益", styles["h1"]))
         if not has_ts:
             story.append(Paragraph(_NO_TS, styles["body"]))
         else:
@@ -635,7 +690,7 @@ class PdfExporter:
 
 
         # ---------- 十、投资 ----------
-        story.append(Paragraph("十、投资", styles["h1"]))
+        story.append(Paragraph("十一、投资", styles["h1"]))
         story.append(
             self._table(
                 ["投资项", "金额（元）"],
@@ -655,7 +710,7 @@ class PdfExporter:
 
 
         # ---------- 十一、现金流 ----------
-        story.append(Paragraph("十一、现金流", styles["h1"]))
+        story.append(Paragraph("十二、现金流", styles["h1"]))
 
         story.append(Paragraph("（一）运营成本", styles["h2"]))
         first = result.annual_results[0] if result.annual_results else None
@@ -716,7 +771,7 @@ class PdfExporter:
 
 
         # ---------- 十二、经济指标 ----------
-        story.append(Paragraph("十二、经济指标", styles["h1"]))
+        story.append(Paragraph("十三、经济指标", styles["h1"]))
 
         story.append(Paragraph("（一）收益测算", styles["h2"]))
         story.append(
@@ -762,7 +817,7 @@ class PdfExporter:
 
 
         # ---------- 十三、方案比较 ----------
-        story.append(Paragraph("十三、方案比较", styles["h1"]))
+        story.append(Paragraph("十四、方案比较", styles["h1"]))
         story.append(
             Paragraph("所有情景均自基准情景复制后施加显式乘数得到，不存在“保守→乐观”的链式推导。", styles["body"])
         )
@@ -784,7 +839,7 @@ class PdfExporter:
 
 
         # ---------- 十四、敏感性 ----------
-        story.append(Paragraph("十四、敏感性", styles["h1"]))
+        story.append(Paragraph("十五、敏感性", styles["h1"]))
         sens_rows = [["变化因素", "变化率", "项目IRR", "资本金IRR", "项目NPV(元)", "静态回收期(年)"]]
         for row in result.sensitivity:
             sens_rows.append(
@@ -803,12 +858,12 @@ class PdfExporter:
 
 
         # ---------- 十五、风险 ----------
-        story.append(Paragraph("十五、风险", styles["h1"]))
+        story.append(Paragraph("十六、风险", styles["h1"]))
         story.append(Paragraph(self._risk_text(project, result), styles["body"]))
 
 
         # ---------- 十六、参数来源 ----------
-        story.append(Paragraph("十六、参数来源", styles["h1"]))
+        story.append(Paragraph("十七、参数来源", styles["h1"]))
         policy = project.policy
         if policy is None:
             story.append(
@@ -872,7 +927,7 @@ class PdfExporter:
             )
         )
         story.append(Spacer(1, 6 * mm))
-        story.append(Paragraph("十七、免责声明", styles["h1"]))
+        story.append(Paragraph("十八、免责声明", styles["h1"]))
 
         story.append(Paragraph(DISCLAIMER, styles["small"]))
         story.append(Paragraph(DISCLAIMER_2, styles["small"]))
@@ -882,6 +937,181 @@ class PdfExporter:
     # ------------------------------------------------------------------ #
     # 辅助
     # ------------------------------------------------------------------ #
+    def _load_consumption_section(
+        self, story: list, project: Project, styles: dict
+    ) -> None:
+        """「五、负荷估算与光伏消纳」章节（V2.2 §6.3 C、§3.3、§0.2；阶段 4 新增）。
+
+        * 数据来源：``LoadProfileService`` 已算好的
+          :class:`~cenep.domain.self_consumption_result.SelfConsumptionResult`
+          与 :class:`~cenep.calculation.load_portrait.LoadPortrait`；
+        * **本方法不做任何算术**：四项指标、逐月明细、口径文本与假设全部来自结果对象
+          （§0.2"核心公式仍在 calculation/"）；
+        * 无结果时输出"尚未执行消纳分析"的中文说明与操作指引，**不缺章节、不报错**；
+        * 分母为 0 的指标显示"不适用"，**不显示 0%**（§3.3）。
+        """
+        story.append(Paragraph("五、负荷估算与光伏消纳", styles["h1"]))
+        result = getattr(self, "_self_consumption", None)
+        portrait = getattr(self, "_load_portrait", None)
+
+        if result is None and portrait is None:
+            story.append(
+                Paragraph(
+                    "尚未执行负荷与消纳分析：本项目还没有可用的负荷数据集"
+                    "（实测高频负荷导入或月账单估算），或本次导出未附带消纳结果。",
+                    styles["body"],
+                )
+            )
+            story.append(
+                Paragraph(
+                    "操作路径：在「负荷与消纳」页面 A 区选择数据来源 → 生成估算曲线或导入实测曲线 → "
+                    "在 C 区点击「计算光伏消纳四项指标」→ 再导出报告。"
+                    "在没有任何负荷数据时，本报告**不提供**任何消纳率结论"
+                    "（V2.2 §6.4、§12：不得用未经说明的默认值制造精确结果）。",
+                    styles["small"],
+                )
+            )
+            return
+
+        if portrait is not None:
+            story.append(Paragraph("（一）负荷数据来源与质量", styles["h2"]))
+            rows = [[name, value] for name, value in portrait.portrait_rows()]
+            story.append(self._table(["项目", "取值"], rows, styles))
+            if portrait.monthly:
+                story.append(Spacer(1, 3 * mm))
+                story.append(Paragraph("逐月电量与负荷率", styles["h2"]))
+                story.append(
+                    self._table(
+                        ["月份", "电量 kWh", "最大功率 kW", "平均功率 kW", "负荷率", "缺失点"],
+                        [
+                            [
+                                item.month_key,
+                                _fmt_energy(item.energy_kwh),
+                                _fmt_num(item.peak_power_kw),
+                                _fmt_num(item.avg_power_kw),
+                                _fmt_pct(item.load_factor),
+                                str(item.missing_value_count),
+                            ]
+                            for item in portrait.monthly
+                        ],
+                        styles,
+                        right_align={1, 2, 3, 4},
+                    )
+                )
+            if portrait.estimated:
+                story.append(Spacer(1, 2 * mm))
+                story.append(
+                    Paragraph(
+                        "⚠ 本负荷曲线为【估算曲线，不是实测】：由月电量与可编辑典型负荷模板生成，"
+                        "估算方法与全部假设见本章（四）。任何基于该曲线的消纳率与收益均只能表述为"
+                        "『基于估算』（V2.2 §0.2 红线）。",
+                        styles["small"],
+                    )
+                )
+
+        if result is None:
+            story.append(
+                Paragraph(
+                    "本次导出未附带消纳计算结果，因此不列出四项指标；"
+                    "请先在「负荷与消纳」页面 C 区执行消纳分析。",
+                    styles["body"],
+                )
+            )
+            return
+
+        story.append(Paragraph("（二）数据来源标签（实测 / 估算必须区分）", styles["h2"]))
+        story.append(
+            self._table(
+                ["项目", "内容"],
+                [
+                    ["负荷来源标签", result.load_source_type.label],
+                    ["是否估算数据", "估算（不是实测）" if result.is_based_on_estimate else "实测导入"],
+                    ["来源徽标", result.estimate_badge],
+                    ["负荷曲线说明", result.load_provenance_text or "—"],
+                    ["光伏曲线说明", result.pv_provenance_text or "—"],
+                    ["时间覆盖率（≠负荷覆盖率）", _fmt_pct(result.coverage_ratio)],
+                    ["数据质量等级", result.data_quality_status.label],
+                    ["时间间隔 / 间隔数", f"{result.interval_minutes} 分钟 / {result.point_count:,}"],
+                ],
+                styles,
+            )
+        )
+
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（三）电量与四项消纳指标（含计算口径）", styles["h2"]))
+        story.append(
+            self._table(
+                ["项目", "数值（kWh）", "口径"],
+                [[name, f"{value:,.3f}", note] for name, value, note in result.energy_rows()],
+                styles,
+                right_align={1},
+            )
+        )
+        story.append(Spacer(1, 3 * mm))
+        story.append(
+            self._table(
+                ["指标", "数值", "口径（分子 / 分母 / 单位 / 边界）"],
+                [
+                    [name, value, caliber]
+                    for name, value, caliber in _pdf_metric_rows(result)
+                ],
+                styles,
+            )
+        )
+        story.append(
+            Paragraph(
+                f"逐间隔能量平衡：最大误差 {result.max_interval_balance_error_kwh:.3e} kWh、"
+                f"全年合计误差 {result.energy_balance_error_kwh:.3e} kWh，"
+                f"容差 {result.balance_tolerance_kwh:g} kWh；"
+                f"{'逐间隔守恒校验通过' if result.is_balanced else '★守恒校验未通过'}。"
+                "不含储能时逐间隔满足「负荷 = 自发自用 + 购电」与「光伏 = 自发自用 + 上网」"
+                "（V2.2 §3.3、§19）。",
+                styles["small"],
+            )
+        )
+
+        if result.monthly:
+            story.append(Spacer(1, 3 * mm))
+            story.append(Paragraph("（四）逐月消纳明细（月度自用率趋势）", styles["h2"]))
+            story.append(
+                self._table(
+                    [
+                        "月份",
+                        "负荷 kWh",
+                        "光伏 kWh",
+                        "自用 kWh",
+                        "上网 kWh",
+                        "购电 kWh",
+                        "自用率",
+                        "负荷覆盖率",
+                        "上网率",
+                        "电网依赖率",
+                    ],
+                    [
+                        [
+                            row.month_key,
+                            _fmt_energy(row.load_energy_kwh),
+                            _fmt_energy(row.pv_generation_kwh),
+                            _fmt_energy(row.pv_used_on_site_kwh),
+                            _fmt_energy(row.pv_export_kwh),
+                            _fmt_energy(row.grid_import_kwh),
+                            row.rate_text("self_consumption"),
+                            row.rate_text("load_coverage"),
+                            row.rate_text("export"),
+                            row.rate_text("grid_dependency"),
+                        ]
+                        for row in result.monthly
+                    ],
+                    styles,
+                    right_align={1, 2, 3, 4, 5},
+                )
+            )
+
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph("（五）关键假设、口径与数据缺口", styles["h2"]))
+        for line in result.assumption_lines():
+            story.append(Paragraph(f"• {line}", styles["small"]))
+
     def _bill_section(self, story: list, project: Project, styles: dict) -> None:
         """「三、账单事实与校验」章节（V2.1 §8.1、§3.1、§5.5；阶段 2 新增）。
 
@@ -1176,11 +1406,22 @@ class PdfExporter:
     # ------------------------------------------------------------------ #
     # 导出
     # ------------------------------------------------------------------ #
-    def export(self, project: Project, result: CalculationResult, path: str | Path) -> Path:
+    def export(
+        self,
+        project: Project,
+        result: CalculationResult,
+        path: str | Path,
+        *,
+        self_consumption=None,
+        load_portrait=None,
+    ) -> Path:
         """导出 PDF 报告，返回实际写入路径。
 
         后缀处理用字符串拼接而**不是** ``Path.with_suffix()``：项目名常含 ``2061.8kWp``、``V1.2`` 这类
         带小数点的片段，``with_suffix`` 会把它们当后缀截掉。
+
+        ``self_consumption`` / ``load_portrait`` 为 V2.2 阶段 4 追加的**可选**参数
+        （来自 ``LoadProfileService``）；既有调用方不传时输出"尚未执行消纳分析"说明。
         """
         target = Path(path)
         if target.suffix.lower() != ".pdf":
@@ -1200,7 +1441,13 @@ class PdfExporter:
             author=APP_NAME,
             subject="工商业新能源项目前期经济测算",
         )
-        story = self.build_story(project, result, styles)
+        story = self.build_story(
+            project,
+            result,
+            styles,
+            self_consumption=self_consumption,
+            load_portrait=load_portrait,
+        )
         doc.build(story, onFirstPage=self._decorate, onLaterPages=self._decorate)
         logger.info("导出 PDF：%s", target)
         return target

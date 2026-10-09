@@ -41,9 +41,10 @@ def exported(golden_pv_storage, tmp_path: Path):
 
 
 class TestReportStructure:
-    def test_seventeen_sections_declared(self):
-        """V2 §66 由 V1 §110 的 15 章重组为 16 部分；V2.1 §8.1 新增「账单事实与校验」→ 17 部分。"""
-        assert len(REPORT_SECTIONS) == 17
+    def test_eighteen_sections_declared(self):
+        """V2 §66 由 V1 §110 的 15 章重组为 16 部分；V2.1 §8.1 新增「账单事实与校验」→ 17 部分；
+        V2.2 §6.3（阶段 4）新增「负荷估算与光伏消纳」→ **18 部分**。"""
+        assert len(REPORT_SECTIONS) == 18
         assert REPORT_SECTIONS[0] == "项目概况"
         assert REPORT_SECTIONS[-1] == "免责声明"
 
@@ -52,6 +53,11 @@ class TestReportStructure:
         assert "账单事实与校验" in REPORT_SECTIONS
         assert REPORT_SECTIONS.index("账单事实与校验") == REPORT_SECTIONS.index("输入参数") + 1
         assert REPORT_SECTIONS.index("账单事实与校验") < REPORT_SECTIONS.index("负荷分析")
+
+    def test_v22_load_consumption_section_declared(self):
+        """V2.2 §6.3（阶段 4）：负荷估算与光伏消纳章节必须声明，且位于「负荷分析」之后。"""
+        assert "负荷估算与光伏消纳" in REPORT_SECTIONS
+        assert REPORT_SECTIONS.index("负荷估算与光伏消纳") == REPORT_SECTIONS.index("负荷分析") + 1
 
     def test_v2_sections_declared(self):
         """V2 §66 新增的 6 个时序章节必须出现在清单中。"""
