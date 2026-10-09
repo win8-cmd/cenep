@@ -1,0 +1,447 @@
+{
+ "source": "东风本田汽车有限公司第三工厂 2025 年 12 份《国网湖北省电力公司电费账单》（户号 4206851784045，交流 110kV 大工业用电，市场化直购客户）",
+ "source_files": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\*.pdf（只读）",
+ "extracted_by": "taiqu-storage/stage5_parse_bills.py（按词块坐标解析，逐份核对自洽性）",
+ "verification": "逐份核对：Σ(1..5) = 工商业电费；工商业电费 + 功率因数调整电费 = 账单总额；计费需量 × 39 元/千瓦·月 = 账单需量电费（12/12 精确相等）；24 小时电量表合计 = 本期电量（12/12 精确相等）。",
+ "totals": {
+  "energy_kwh": 85269994.0,
+  "amount_yuan": 62277707.14,
+  "weighted_price_yuan_per_kwh": 0.7303589952170044
+ },
+ "tou_structure_official_periods": {
+  "尖峰": {
+   "kwh": 7804456.0,
+   "share": 0.0915264049391161
+  },
+  "高峰": {
+   "kwh": 24276427.0,
+   "share": 0.2847007002252164
+  },
+  "平段": {
+   "kwh": 32662675.0,
+   "share": 0.38305004454439157
+  },
+  "谷段": {
+   "kwh": 20526436.0,
+   "share": 0.24072285029127596
+  },
+  "深谷": {
+   "kwh": 0.0,
+   "share": 0.0
+  },
+  "自定义": {
+   "kwh": 0.0,
+   "share": 0.0
+  }
+ },
+ "months": [
+  {
+   "billing_month": "2025-01",
+   "file_name": "电费明细（1月）.pdf",
+   "billing_period_start": "2025-01-01",
+   "billing_period_end": "2025-01-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 6871000.0,
+   "energy_charge_yuan": 4340508.12,
+   "demand_kw": 20664.0,
+   "demand_charge_yuan": 805896.0,
+   "power_factor_yuan": -35240.35,
+   "bill_total_yuan": 5111163.77,
+   "avg_price_declared": 0.74387,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.412442681,
+    "line_loss": 0.022017191,
+    "transmission_distribution": 0.090854307,
+    "system_operation": 0.0612,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1803815.0,
+    "FLAT": 2499211.0,
+    "PEAK": 1947993.0,
+    "SHARP_PEAK": 619981.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.612866,
+    "FLAT": 0.625623,
+    "PEAK": 0.649221,
+    "SHARP_PEAK": 0.6561
+   }
+  },
+  {
+   "billing_month": "2025-02",
+   "file_name": "电费明细（2月）.pdf",
+   "billing_period_start": "2025-02-01",
+   "billing_period_end": "2025-02-28",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 4167529.0,
+   "energy_charge_yuan": 2465017.24,
+   "demand_kw": 20218.0,
+   "demand_charge_yuan": 788502.0,
+   "power_factor_yuan": -22402.51,
+   "bill_total_yuan": 3231116.73,
+   "avg_price_declared": 0.77531,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.354424022,
+    "line_loss": 0.021203394,
+    "transmission_distribution": 0.09085431,
+    "system_operation": 0.079799999,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 999313.0,
+    "FLAT": 1661210.0,
+    "PEAK": 1143089.0,
+    "SHARP_PEAK": 363917.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.556077,
+    "FLAT": 0.551399,
+    "PEAK": 0.658099,
+    "SHARP_PEAK": 0.662423
+   }
+  },
+  {
+   "billing_month": "2025-03",
+   "file_name": "本田三厂3月账单.pdf",
+   "billing_period_start": "2025-03-01",
+   "billing_period_end": "2025-03-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 6237804.0,
+   "energy_charge_yuan": 3632782.08,
+   "demand_kw": 20119.0,
+   "demand_charge_yuan": 784641.0,
+   "power_factor_yuan": -30151.56,
+   "bill_total_yuan": 4387271.52,
+   "avg_price_declared": 0.70334,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.390052757,
+    "line_loss": 0.0208745,
+    "transmission_distribution": 0.090854305,
+    "system_operation": 0.035400005,
+    "government_fund": 0.045200001
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1373742.0,
+    "FLAT": 2423781.0,
+    "PEAK": 1856056.0,
+    "SHARP_PEAK": 584225.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.55088,
+    "FLAT": 0.551646,
+    "PEAK": 0.628683,
+    "SHARP_PEAK": 0.636869
+   }
+  },
+  {
+   "billing_month": "2025-04",
+   "file_name": "东三4月账单.pdf",
+   "billing_period_start": "2025-04-01",
+   "billing_period_end": "2025-04-30",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 4977469.0,
+   "energy_charge_yuan": 2872325.19,
+   "demand_kw": 20851.0,
+   "demand_charge_yuan": 813189.0,
+   "power_factor_yuan": -25270.09,
+   "bill_total_yuan": 3660244.1,
+   "avg_price_declared": 0.73536,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.392570192,
+    "line_loss": 0.021540918,
+    "transmission_distribution": 0.0908543,
+    "system_operation": 0.026900001,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1201338.0,
+    "FLAT": 1903458.0,
+    "PEAK": 1423346.0,
+    "SHARP_PEAK": 449327.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.551861,
+    "FLAT": 0.542775,
+    "PEAK": 0.626478,
+    "SHARP_PEAK": 0.633186
+   }
+  },
+  {
+   "billing_month": "2025-05",
+   "file_name": "东本3厂5月账单.pdf",
+   "billing_period_start": "2025-05-01",
+   "billing_period_end": "2025-05-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 5504398.0,
+   "energy_charge_yuan": 3049289.11,
+   "demand_kw": 28391.0,
+   "demand_charge_yuan": 1107249.0,
+   "power_factor_yuan": -28580.35,
+   "bill_total_yuan": 4127957.76,
+   "avg_price_declared": 0.74994,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.37735393,
+    "line_loss": 0.021464985,
+    "transmission_distribution": 0.090854308,
+    "system_operation": 0.019100001,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1289501.0,
+    "FLAT": 2156771.0,
+    "PEAK": 1555359.0,
+    "SHARP_PEAK": 502767.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.527644,
+    "FLAT": 0.537425,
+    "PEAK": 0.587729,
+    "SHARP_PEAK": 0.588064
+   }
+  },
+  {
+   "billing_month": "2025-06",
+   "file_name": "本三6月账单 (1).pdf",
+   "billing_period_start": "2025-06-01",
+   "billing_period_end": "2025-06-30",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 6537884.0,
+   "energy_charge_yuan": 3662625.52,
+   "demand_kw": 29343.0,
+   "demand_charge_yuan": 1144377.0,
+   "power_factor_yuan": -32962.67,
+   "bill_total_yuan": 4774039.85,
+   "avg_price_declared": 0.73021,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.385252348,
+    "line_loss": 0.020709089,
+    "transmission_distribution": 0.090854301,
+    "system_operation": 0.018200002,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1470633.0,
+    "FLAT": 2575781.0,
+    "PEAK": 1873092.0,
+    "SHARP_PEAK": 618378.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.530509,
+    "FLAT": 0.531131,
+    "PEAK": 0.606514,
+    "SHARP_PEAK": 0.611775
+   }
+  },
+  {
+   "billing_month": "2025-07",
+   "file_name": "本三7月账单.pdf",
+   "billing_period_start": "2025-07-01",
+   "billing_period_end": "2025-07-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 9675782.0,
+   "energy_charge_yuan": 5805894.7,
+   "demand_kw": 31444.0,
+   "demand_charge_yuan": 1226316.0,
+   "power_factor_yuan": -48082.12,
+   "bill_total_yuan": 6984128.58,
+   "avg_price_declared": 0.72182,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.40523117,
+    "line_loss": 0.0202585,
+    "transmission_distribution": 0.090854304,
+    "system_operation": 0.038500001,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 2073093.0,
+    "FLAT": 3935141.0,
+    "PEAK": 2773850.0,
+    "SHARP_PEAK": 893698.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.58827,
+    "FLAT": 0.564767,
+    "PEAK": 0.642219,
+    "SHARP_PEAK": 0.651785
+   }
+  },
+  {
+   "billing_month": "2025-08",
+   "file_name": "本三8月账单 (1).pdf",
+   "billing_period_start": "2025-08-01",
+   "billing_period_end": "2025-08-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 9230893.0,
+   "energy_charge_yuan": 5667362.08,
+   "demand_kw": 32687.0,
+   "demand_charge_yuan": 1274793.0,
+   "power_factor_yuan": -47592.1,
+   "bill_total_yuan": 6894562.98,
+   "avg_price_declared": 0.7469,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.417008312,
+    "line_loss": 0.020093377,
+    "transmission_distribution": 0.090854305,
+    "system_operation": 0.0408,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1988769.0,
+    "FLAT": 3671501.0,
+    "PEAK": 2689137.0,
+    "SHARP_PEAK": 881486.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.594657,
+    "FLAT": 0.592736,
+    "PEAK": 0.645276,
+    "SHARP_PEAK": 0.650337
+   }
+  },
+  {
+   "billing_month": "2025-09",
+   "file_name": "本三9月账单.pdf",
+   "billing_period_start": "2025-09-01",
+   "billing_period_end": "2025-09-30",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 8780498.0,
+   "energy_charge_yuan": 5505532.31,
+   "demand_kw": 30844.0,
+   "demand_charge_yuan": 1202916.0,
+   "power_factor_yuan": -9206.37,
+   "bill_total_yuan": 6699241.94,
+   "avg_price_declared": 0.76297,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.43733872,
+    "line_loss": 0.020425205,
+    "transmission_distribution": 0.090854305,
+    "system_operation": 0.0332,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 1864882.0,
+    "FLAT": 3448455.0,
+    "PEAK": 2608216.0,
+    "SHARP_PEAK": 858945.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.605283,
+    "FLAT": 0.625757,
+    "PEAK": 0.63889,
+    "SHARP_PEAK": 0.643225
+   }
+  },
+  {
+   "billing_month": "2025-10",
+   "file_name": "东本三厂10月账单.pdf",
+   "billing_period_start": "2025-10-01",
+   "billing_period_end": "2025-10-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 7479418.0,
+   "energy_charge_yuan": 4400963.05,
+   "demand_kw": 28413.0,
+   "demand_charge_yuan": 1108107.0,
+   "power_factor_yuan": -37735.81,
+   "bill_total_yuan": 5471334.24,
+   "avg_price_declared": 0.73152,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.38936752,
+    "line_loss": 0.019435004,
+    "transmission_distribution": 0.090854302,
+    "system_operation": 0.043553001,
+    "government_fund": 0.0452
+   },
+   "period_energy_kwh": {
+    "VALLEY": 2063117.0,
+    "FLAT": 2698515.0,
+    "PEAK": 2063117.0,
+    "SHARP_PEAK": 654669.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.560477,
+    "FLAT": 0.552324,
+    "PEAK": 0.64308,
+    "SHARP_PEAK": 0.652892
+   }
+  },
+  {
+   "billing_month": "2025-11",
+   "file_name": "11月东本三厂.pdf",
+   "billing_period_start": "2025-11-01",
+   "billing_period_end": "2025-11-30",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 7726640.0,
+   "energy_charge_yuan": 4702510.79,
+   "demand_kw": 20174.0,
+   "demand_charge_yuan": 786786.0,
+   "power_factor_yuan": -38544.89,
+   "bill_total_yuan": 5450751.9,
+   "avg_price_declared": 0.70545,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.422120649,
+    "line_loss": 0.020246099,
+    "transmission_distribution": 0.090854304,
+    "system_operation": 0.030189001,
+    "government_fund": 0.045200002
+   },
+   "period_energy_kwh": {
+    "VALLEY": 2195813.0,
+    "FLAT": 2761834.0,
+    "PEAK": 2102210.0,
+    "SHARP_PEAK": 666783.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.599161,
+    "FLAT": 0.598019,
+    "PEAK": 0.624888,
+    "SHARP_PEAK": 0.632274
+   }
+  },
+  {
+   "billing_month": "2025-12",
+   "file_name": "东本三厂12月账单.pdf",
+   "billing_period_start": "2025-12-01",
+   "billing_period_end": "2025-12-31",
+   "customer_no": "4206851784045",
+   "voltage_level": "110千伏",
+   "energy_total_kwh": 8080679.0,
+   "energy_charge_yuan": 4791353.45,
+   "demand_kw": 18794.0,
+   "demand_charge_yuan": 732966.0,
+   "power_factor_yuan": -38425.68,
+   "bill_total_yuan": 5485893.77,
+   "avg_price_declared": 0.67889,
+   "component_unit_price_yuan_per_kwh": {
+    "market_energy": 0.378332461,
+    "line_loss": 0.020146699,
+    "transmission_distribution": 0.090854299,
+    "system_operation": 0.058406,
+    "government_fund": 0.045200001
+   },
+   "period_energy_kwh": {
+    "VALLEY": 2202420.0,
+    "FLAT": 2927017.0,
+    "PEAK": 2240962.0,
+    "SHARP_PEAK": 710280.0
+   },
+   "period_unit_price_yuan_per_kwh": {
+    "VALLEY": 0.568279,
+    "FLAT": 0.560008,
+    "PEAK": 0.641489,
+    "SHARP_PEAK": 0.65194
+   }
+  }
+ ]
+}

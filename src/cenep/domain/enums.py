@@ -788,3 +788,135 @@ class LoadEstimateSource(StrEnum):
     def is_default_assumption(self) -> bool:
         """是否为"没有用户信息、只能按明确默认假设"的来源（§6.5 要求显著标注）。"""
         return self is LoadEstimateSource.UNIFORM_DEFAULT
+
+
+# --------------------------------------------------------------------------- #
+# V2.3 §2.3、§4.1、§4.2 用户侧工商业购电电价计划（阶段 5 新增，仅追加）
+# --------------------------------------------------------------------------- #
+# 说明：以下枚举是 **V2.3 阶段 5 新增**，全部追加在文件末尾；未修改任何既有枚举的
+# 成员或取值，V1／V2／V2.1／V2.2 的公开接口与既有项目文件字段语义不受影响。
+#
+# 概念分离（§2.3 明确要求）：这些枚举描述的是**用户侧工商业购电电价**，
+# 与 `policy/hubei.py` 里的"新能源上网电价模板"（PolicyTemplate／PolicyProfile）
+# 不是同一件事，不得互相复用。
+# --------------------------------------------------------------------------- #
+class TariffComponentType(StrEnum):
+    """电价组成分项类型（V2.3 §2.3、§4.1）。
+
+    与账单字段 ``BILL_ENERGY_SUB_CHARGE_FIELDS`` 一一对应，便于"账单分项 → 电价计划分项"
+    的口径核对；``OTHER`` 用于账单已列但本阶段未建模的费用。
+    """
+
+    MARKET_ENERGY = "market_energy"
+    LINE_LOSS = "line_loss"
+    TRANSMISSION_DISTRIBUTION = "transmission_distribution"
+    SYSTEM_OPERATION = "system_operation"
+    GOVERNMENT_FUND = "government_fund"
+    OTHER = "other"
+
+    @property
+    def label(self) -> str:
+        return {
+            TariffComponentType.MARKET_ENERGY: "电能量（代理购电 / 市场化）电价",
+            TariffComponentType.LINE_LOSS: "上网环节线损费用折价",
+            TariffComponentType.TRANSMISSION_DISTRIBUTION: "电度输配电价",
+            TariffComponentType.SYSTEM_OPERATION: "系统运行费折价",
+            TariffComponentType.GOVERNMENT_FUND: "政府性基金及附加",
+            TariffComponentType.OTHER: "其他费用",
+        }[self]
+
+
+class TariffComponentUnit(StrEnum):
+    """电价分项单位（V2.3 §2.3）。字段名与单位必须同时可追溯。"""
+
+    YUAN_PER_KWH = "yuan_per_kwh"
+    YUAN_PER_KW_MONTH = "yuan_per_kw_month"
+    YUAN_PER_KVA_MONTH = "yuan_per_kva_month"
+    FIXED_YUAN_PER_MONTH = "fixed_yuan_per_month"
+    PERCENTAGE = "percentage"
+
+    @property
+    def label(self) -> str:
+        return {
+            TariffComponentUnit.YUAN_PER_KWH: "元/千瓦时",
+            TariffComponentUnit.YUAN_PER_KW_MONTH: "元/千瓦·月",
+            TariffComponentUnit.YUAN_PER_KVA_MONTH: "元/千伏安·月",
+            TariffComponentUnit.FIXED_YUAN_PER_MONTH: "元/月",
+            TariffComponentUnit.PERCENTAGE: "%",
+        }[self]
+
+
+class TariffPlanStatus(StrEnum):
+    """电价计划核验状态（V2.3 §2.3、§4.1、§7.4）。
+
+    * ``DRAFT``：草稿。**价格缺失或未核验的计划只能是草稿**，禁止用于正式账单复算（§4.2）；
+    * ``VERIFIED``：已核验。必须具备适用范围、生效日期、来源与必要价格参数（§2.3）；
+    * ``EXPIRED``：已失效（超过 ``effective_to``）。仍可查阅与复现历史，但不得用于新测算。
+    """
+
+    DRAFT = "draft"
+    VERIFIED = "verified"
+    EXPIRED = "expired"
+
+    @property
+    def label(self) -> str:
+        return {
+            TariffPlanStatus.DRAFT: "草稿（未核验，不得用于正式结论）",
+            TariffPlanStatus.VERIFIED: "已核验",
+            TariffPlanStatus.EXPIRED: "已过期",
+        }[self]
+
+
+class MarketMode(StrEnum):
+    """用户购电模式（V2.3 §2.3、§7.3、§4.1 第 6 条）。"""
+
+    RETAIL_MARKET = "retail_market"
+    UTILITY_AGENT = "utility_agent"
+    FIXED_CONTRACT = "fixed_contract"
+    MANUAL = "manual"
+
+    @property
+    def label(self) -> str:
+        return {
+            MarketMode.RETAIL_MARKET: "市场化直购",
+            MarketMode.UTILITY_AGENT: "电网企业代理购电",
+            MarketMode.FIXED_CONTRACT: "固定合同价",
+            MarketMode.MANUAL: "用户手工录入",
+        }[self]
+
+
+class DemandBillingMode(StrEnum):
+    """两部制基本电费的计费方式（V2.3 §3.4、§7.5）。
+
+    ``CAPACITY`` 与 ``DEMAND`` **默认互斥**；只有明确配置时才允许特殊组合（§7.5）。
+    """
+
+    CAPACITY = "capacity"
+    DEMAND = "demand"
+    NONE = "none"
+
+    @property
+    def label(self) -> str:
+        return {
+            DemandBillingMode.CAPACITY: "按变压器容量计费",
+            DemandBillingMode.DEMAND: "按最大需量计费",
+            DemandBillingMode.NONE: "不计基本电费",
+        }[self]
+
+
+class PriceBasis(StrEnum):
+    """某时段的**最终价格来源**口径（V2.3 §2.3 关键约束）。
+
+    ``price_multiplier`` 与 ``direct_price_yuan_per_kwh`` 不得同时作为最终价格来源，
+    因此必须显式声明以哪一个为准；另一个只能作为**参考值**（用于交叉校验并在报告中披露差异）。
+    """
+
+    DIRECT_PRICE = "direct_price"
+    MULTIPLIER = "multiplier"
+
+    @property
+    def label(self) -> str:
+        return {
+            PriceBasis.DIRECT_PRICE: "直接单价（元/千瓦时）",
+            PriceBasis.MULTIPLIER: "基础电价 × 浮动系数",
+        }[self]

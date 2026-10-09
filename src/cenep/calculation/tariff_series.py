@@ -225,3 +225,92 @@ def peak_valley_spread(series: TariffSeries) -> float:
 
 #: 向后兼容别名（旧名 ``price_of``）
 price_of = price_for_period
+
+
+# --------------------------------------------------------------------------- #
+# V2.3 §7.2：版本化电价计划 → V2 TariffProfile 的**追加式适配器**
+# --------------------------------------------------------------------------- #
+# 说明（追加式扩展，不改动本模块任何既有函数的行为）：
+#   * V2.3 的 `TariffPlan`（用户侧工商业购电电价计划，policy/hubei_commercial.py）
+#     是"版本化 + 有来源 + 有适用范围"的新模型；
+#   * V2 既有的 `TariffProfile` 是储能调度与时序引擎的电价输入口径；
+#   * 阶段 6 需要在**同一套电价**下跑方案对比，因此这里提供单向适配器
+#     `TariffPlan → TariffProfile`，让既有 dispatch/timeseries 引擎直接复用，
+#     **不新建第二套调度或电价引擎**（§0.2、§7.2）。
+# --------------------------------------------------------------------------- #
+def tariff_profile_from_plan(
+    plan,
+    *,
+    month: int,
+    export_price: float = 0.0,
+    demand_charge: float | None = None,
+    basic_charge: float = 0.0,
+    tariff_id_suffix: str = "",
+):
+    """把版本化电价计划转为某个月的 :class:`~cenep.domain.timeseries.TariffProfile`（§7.2）。
+
+    * 时段规则：只取 **在 ``month`` 生效**的规则，逐小时展开为
+      :class:`~cenep.domain.timeseries.TimePeriodRule`；声明顺序与优先级一致
+      （``priority`` 升序、同级按声明顺序），与既有引擎"后声明覆盖先声明"的语义配合；
+    * 时段价格：取 :func:`cenep.calculation.tariff_plan_engine.effective_period_prices`
+      的**最终价格**（直接单价优先，缺失时为 0 并由调用方在校验阶段拦截）；
+    * 需量电价（元/kW·月）默认取计划的 ``demand_charge_yuan_per_kw_month``；
+      基本电费（元/月）不能由容量电价直接得出，必须由调用方显式给出。
+
+    :param plan: :class:`~cenep.domain.tariff_models.TariffPlan`
+    :param month: 目标月份 1~12（该计划可能对 7、8 月与其他月份采用不同时段）
+    :param export_price: 上网电价（元/kWh）；本适配器**不臆造**，默认 0 并由调用方覆盖
+    :raises ValidationError: 月份非法
+    """
+    from ..domain.timeseries import TariffProfile, TimePeriodRule
+    from .errors import ValidationError
+    from .tariff_plan_engine import effective_period_prices
+
+    month = int(month)
+    if not 1 <= month <= 12:
+        raise ValidationError(f"月份必须在 1~12，实际为 {month}", field="month")
+
+    prices = effective_period_prices(plan)
+    rules: list[TimePeriodRule] = []
+    ordered = sorted(enumerate(plan.time_period_rules), key=lambda item: (item[1].priority, item[0]))
+    for _, rule in ordered:
+        if rule.months and month not in {int(m) for m in rule.months}:
+            continue
+        hours = [hour for hour in range(24) if rule.covers_minute(hour * 60)]
+        if not hours:
+            continue
+        rules.append(
+            TimePeriodRule(period=rule.period, months=[month], hours=hours)
+        )
+
+    def price_of(period) -> float:
+        value = prices.get(period)
+        return float(value) if value is not None else 0.0
+
+    profile = TariffProfile(
+        tariff_id=f"{plan.tariff_plan_id}{tariff_id_suffix}",
+        name=f"{plan.name}（{month} 月）",
+        effective_date=plan.effective_from,
+        region=plan.province,
+        time_periods=rules,
+        sharp_peak_price=price_of(TariffPeriod.SHARP_PEAK),
+        peak_price=price_of(TariffPeriod.PEAK),
+        flat_price=price_of(TariffPeriod.FLAT),
+        valley_price=price_of(TariffPeriod.VALLEY),
+        deep_valley_price=price_of(TariffPeriod.DEEP_VALLEY),
+        custom_price=price_of(TariffPeriod.CUSTOM),
+        export_price=float(export_price),
+        demand_charge=float(
+            demand_charge
+            if demand_charge is not None
+            else (plan.demand_charge_yuan_per_kw_month or 0.0)
+        ),
+        basic_charge=float(basic_charge),
+    )
+    logger.debug(
+        "电价计划适配为 TariffProfile：%s → %d 条时段规则（%d 月）",
+        plan.tariff_plan_id,
+        len(rules),
+        month,
+    )
+    return profile

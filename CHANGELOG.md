@@ -17,6 +17,73 @@
 
 ---
 
+---
+
+## [Unreleased] — V2.3（阶段 5：湖北电价规则与基准账单复算）
+
+> **定位**：《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 5——
+> 「核验官方政策和适用范围；实现版本化电价计划、时段匹配和冲突检测；实现基准账单复算与差异分析；
+> 对照实际账单进行校准」。对应规格书 §2.3、§3.4、§4、§7、§9.3。
+>
+> **状态**：**已交付并可运行**。全部改动为**附加式**：未新增/修改任何 UI 代码，
+> 未删除或改变 V2/V2.1/V2.2 的任何公开接口、项目文件字段语义、既有公式或报告字段。
+> 阶段契约、官方数据核验过程、差异结论与实测记录见
+> **`V2.3_HUBEI_TARIFF_AND_BILL_RECOMPUTATION.md`**。
+
+### Added（V2.3 阶段 5 新增）
+
+- **`src/cenep/domain/tariff_models.py`**：版本化用户侧工商业购电电价计划
+  `TariffPlan` / 分时时段规则 `TariffTimePeriodRule` / 电价分项 `TariffPriceComponent`
+  及校验、覆盖、对比结果对象（§2.3、§4.2）。
+  与 `policy/hubei.py` 的**新能源上网电价**模板严格概念分离（§2.3 明确要求）。
+- **`src/cenep/domain/bill_recomputation.py`**：基准账单复算与校准结果对象
+  `BillRecomputation` / `BillCalibrationSummary` / `BillDifferenceItem`（§3.4、§7.4、§7.5）。
+  `BillSimulationResult`（方案对比）属阶段 6，本阶段不实现。
+- **`src/cenep/calculation/tariff_plan_engine.py`**：时段匹配、24 小时覆盖与冲突检测、
+  价格口径校验（T01~T13）、版本选取、逐时电价序列、两套计划逐项差异对比（§4.2、§7.3、§7.7）。
+  **未定义时段一律阻断，不按平段兜底**（与既有 `tariff_series` 的兜底行为并存，互不影响）。
+- **`src/cenep/calculation/bill_recalculator.py`**：`C_energy = Σ E_i × P_i`、
+  容量/需量基本电费（互斥）、差异分解（电度电费差 + 基本电费差 + 未建模费用 + 调整项 + 口径残差，
+  各分项之和严格等于毛差异）、年度校准（§3.4、§3.1、§7.4）。
+- **`src/cenep/policy/hubei_commercial.py`**：**两套并存**的湖北电价计划——
+  ① 官方 2026-01《代理购电工商业用户电价表》（7 个电压等级/计费方式组合，逐项带来源、文号
+  `鄂发改价管〔2024〕77 号`、抓取日期与核验状态）；② 东风本田项目资料版
+  （尖峰 180%/高峰 149%/平段 100%/低谷 48%），与官方版逐项差异已量化。
+- **`src/cenep/policy/tariff_plan_store.py`**：电价计划版本库
+  （内置计划幂等播种、SQLite 持久化、按日期+适用范围选取、用户覆盖留痕、市场化直购变体派生）。
+- **`src/cenep/application/tariff_service.py`**：阶段 5 应用服务编排
+  （计划查询/校验/对比、单张与多张账单复算、年度校准、**按用户账单反算实际分时电价**、
+  报告行数据）（§7.1–§7.4、§8.1）。
+- **5 个新测试文件共 172 个用例**：`tests/test_tariff_plan.py`、`tests/test_hubei_tariff_rules.py`、
+  `tests/test_bill_recalculator.py`、`tests/test_tariff_service.py`、
+  `tests/test_bill_recalculation_calibration.py`；校准回归用 12 份**真实账单**结构化事实
+  （`tests/data/dongfeng_2025_bill_facts.json`）固化"复算必须复现账单"的性质（§7.4、§10 阶段 5）。
+- **`V2.3_HUBEI_TARIFF_AND_BILL_RECOMPUTATION.md`**：阶段 5 契约、官方数据核验过程、
+  资料版 vs 官方版逐项差异、12 份账单复算差异构成与全部结论。
+
+### Changed（V2.3 阶段 5，均为追加式）
+
+- **`src/cenep/domain/enums.py`**（仅追加）：新增 `TariffComponentType`、`TariffComponentUnit`、
+  `TariffPlanStatus`、`MarketMode`、`DemandBillingMode`、`PriceBasis`。既有枚举成员与取值未改动。
+- **`src/cenep/calculation/tariff_series.py`**（仅追加）：新增
+  `tariff_profile_from_plan()` 适配器（`TariffPlan → TariffProfile`），供阶段 6 在**同一套电价**下
+  复用既有调度/时序引擎。既有函数与行为**零改动**。
+- **`src/cenep/infrastructure/db.py`**（仅追加）：新增 `tariff_plans` 表（`CREATE TABLE IF NOT EXISTS`）
+  与 `save_tariff_plan` / `load_tariff_plan` / `list_tariff_plans` / `delete_tariff_plan`。
+  既有表与方法未改动，旧库可直接打开（§8.2）。
+- **`HUBEI_POLICY_MODEL.md`**（仅追加第 10 节）：说明"新能源上网电价政策"与
+  "用户侧工商业购电电价计划"的概念分离、官方数据来源与核实状态更新。
+
+### Not Changed（明确声明）
+
+- **`src/cenep/ui/`**：**一行未改**。阶段 6 或后续再接界面；本阶段全部能力已通过
+  `application/tariff_service.py` 暴露，UI 不得实现任何电价或账单公式（§0.2）。
+- **`src/cenep/policy/hubei.py`**、**`policy/template.py`**、**`policy/store.py`**：
+  新能源上网电价模板与版本机制**未改动**（§2.3 要求不得与购电电价混用）。
+- **`calculation/bill_calculator.py`**：V2.1 账单校验公式**未改动**（账单事实的唯一公式实现处）。
+
+---
+
 ## [Unreleased] — V2.2（阶段 4：月账单估算与光伏消纳计算）
 
 > **定位**：《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 4——

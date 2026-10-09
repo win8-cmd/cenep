@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..domain.models import PolicyProfile, Project
+# V2.3 阶段 5：用户侧工商业电价计划（与 PolicyProfile 概念分离，见下方注释）
+from ..domain.tariff_models import TariffPlan
 
 DEFAULT_DB_NAME = "cenep.db"
 
@@ -54,6 +56,17 @@ CREATE TABLE IF NOT EXISTS project_history (
     project_name TEXT NOT NULL DEFAULT '',
     project_type TEXT NOT NULL DEFAULT '',
     opened_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tariff_plans (
+    tariff_plan_id  TEXT PRIMARY KEY,
+    name            TEXT NOT NULL DEFAULT '',
+    province        TEXT NOT NULL DEFAULT '',
+    effective_from  TEXT NOT NULL DEFAULT '',
+    effective_to    TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'draft',
+    payload         TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
 );
 """
 
@@ -221,6 +234,61 @@ class Database:
             }
             for r in rows
         ]
+
+    # ------------------------------------------------------------------ #
+    # V2.3 §2.3、§7.3 用户侧工商业购电电价计划（阶段 5 新增，仅追加）
+    # ------------------------------------------------------------------ #
+    # 说明：与 policy_profiles（新能源上网电价政策）**概念分离**：
+    # 前者是发电侧上网电价，后者是用电侧购电电价，不得共用同一张表。
+    # ------------------------------------------------------------------ #
+    def save_tariff_plan(self, plan: "TariffPlan") -> None:
+        """写入/覆盖一份电价计划（按 ``tariff_plan_id`` 主键）。
+
+        .. warning::
+           与"政策模板只新增不覆盖"不同，电价计划**允许修订**（例如用户修正价格或补录来源），
+           因此这里用 upsert。修订前后的差异应由服务层记录在 ``override_note`` / ``notes`` 中，
+           历史版本的追溯依赖 ``tariff_plan_id`` 中带版本期（如 ``..._2026_01_...``）。
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO tariff_plans "
+            "(tariff_plan_id, name, province, effective_from, effective_to, status, payload, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                plan.tariff_plan_id,
+                plan.name,
+                plan.province,
+                plan.effective_from.isoformat(),
+                plan.effective_to.isoformat() if plan.effective_to else "",
+                plan.status.value,
+                plan.model_dump_json(),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        self._conn.commit()
+
+    def load_tariff_plan(self, tariff_plan_id: str) -> "TariffPlan | None":
+        row = self._conn.execute(
+            "SELECT payload FROM tariff_plans WHERE tariff_plan_id = ?", (tariff_plan_id,)
+        ).fetchone()
+        return TariffPlan.model_validate_json(row["payload"]) if row else None
+
+    def list_tariff_plans(self, province: str | None = None) -> list["TariffPlan"]:
+        sql = "SELECT payload FROM tariff_plans"
+        params: tuple = ()
+        if province:
+            sql += " WHERE province = ?"
+            params = (province,)
+        sql += " ORDER BY effective_from, tariff_plan_id"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [TariffPlan.model_validate_json(row["payload"]) for row in rows]
+
+    def delete_tariff_plan(self, tariff_plan_id: str) -> int:
+        """删除一份电价计划，返回删除条数（0 = 原本不存在）。"""
+        cursor = self._conn.execute(
+            "DELETE FROM tariff_plans WHERE tariff_plan_id = ?", (tariff_plan_id,)
+        )
+        self._conn.commit()
+        return int(cursor.rowcount)
 
     def close(self) -> None:
         self._conn.close()
