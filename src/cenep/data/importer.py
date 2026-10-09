@@ -550,14 +550,25 @@ def _build_points(
 
 
 def _infer_resolution(points: list[TimeSeriesPoint]) -> Resolution:
-    """按相邻时间差推断分辨率（用于填写 ``Profile.resolution``）。"""
+    """按相邻时间差推断分辨率（用于填写 ``Profile.resolution``）。
+
+    V2.2 阶段 3 增量：新增 ``HALF_HOURLY``（30 分钟）判定。
+    在此之前，30 分钟数据会被推断成 ``QUARTER_HOURLY``（Δt 0.25 h 而非 0.5 h），
+    任何基于 Δt 的功率/电量换算都会差 2 倍，属**修正**而非行为变更：
+    15 分钟与 1 小时及以上数据的判定边界与结果完全不变。
+    """
     if len(points) < 2:
         return Resolution.HOURLY
     stamps = sorted(p.timestamp for p in points)
     deltas = [(b - a).total_seconds() for a, b in zip(stamps, stamps[1:])]
     median = float(np.median(np.asarray(deltas, dtype=float)))
     if median <= 60.0 * 60.0 * 0.5:
-        return Resolution.QUARTER_HOURLY
+        # 30 分钟（1800 秒）落在 15 分钟与 1 小时之间：超过 22.5 分钟即判为 30 分钟
+        return (
+            Resolution.HALF_HOURLY
+            if median > 15.0 * 60.0 * 1.5
+            else Resolution.QUARTER_HOURLY
+        )
     if median <= 24.0 * 3600.0 * 0.5:
         return Resolution.HOURLY
     if median <= 31.0 * 24.0 * 3600.0 * 0.5:
