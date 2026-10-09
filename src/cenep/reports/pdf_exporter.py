@@ -36,6 +36,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from .. import APP_NAME
 from ..domain.models import Project
 from ..domain.results import CalculationResult
 from ..infrastructure.logging_setup import get_logger
@@ -938,7 +939,7 @@ class PdfExporter:
             topMargin=18 * mm,
             bottomMargin=16 * mm,
             title=f"{project.basic_info.project_name} 经济评价报告",
-            author="CENEP V1",
+            author=APP_NAME,
             subject="工商业新能源项目前期经济测算",
         )
         story = self.build_story(project, result, styles)

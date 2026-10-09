@@ -8,9 +8,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from .. import APP_NAME
 from ..infrastructure.logging_setup import setup_logging
 
-APP_NAME = "CENEP V2"
 ORG_NAME = "CENEP"
 
 

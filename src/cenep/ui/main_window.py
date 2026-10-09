@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QCloseEvent
 
-from .. import __version__
+from .. import APP_NAME, __version__
 from ..application.calculation_service import CalculationService
 from ..application.project_service import ProjectService
 from ..calculation.errors import CalculationError
@@ -46,7 +46,7 @@ logger = get_logger()
 
 
 class MainWindow(QMainWindow):
-    """CENEP V1 主窗口。"""
+    """CENEP 主窗口。"""
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
         db_path: str | Path = "cenep.db",
     ) -> None:
         super().__init__()
-        self.setWindowTitle(f"CENEP V1 — 工商业新能源项目经济评价软件（v{__version__}）")
+        self.setWindowTitle(f"{APP_NAME} — 工商业新能源项目经济评价软件（v{__version__}）")
         self.resize(1280, 860)
 
         self.database = Database(db_path)
