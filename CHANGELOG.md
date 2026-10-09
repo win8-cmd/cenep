@@ -17,6 +17,66 @@
 
 ---
 
+## [Unreleased] — V2.2（阶段 4：月账单估算与光伏消纳计算）
+
+> **定位**：《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 4——
+> 「实现可编辑典型负荷模板和月电量回归；实现消纳率纯计算模块；复用 PV profile 和
+> 能量平衡引擎；完成 UI 曲线和指标；完成 Excel/PDF 输出和测试」。
+>
+> **状态**：**已交付并可运行**。全部改动为**附加式**：既有 9 个页面标题与相对顺序、
+> 既有 26 张工作表与 17 个 PDF 部分的**名目与内容一项未删**；
+> 新增页面 / 工作表 / 章节均为追加（PDF 章节编号顺延，内容不变）。
+> 每阶段契约与实测记录见 **`V2.2_SELF_CONSUMPTION_SPEC.md`**。
+>
+> **红线遵守**：核心公式全部在 `calculation/`（`self_consumption.py`、`load_estimate.py`、
+> `load_portrait.py`），界面**零计算**（静态扫描锁定）；`policy/hubei.py` 未改动（仍全 `None`）；
+> 估算曲线与实测曲线在**类型层**强制区分（`LoadDataSourceType` + `estimated` + `is_estimate`），
+> 估算结果始终携带"基于估算"标记。
+
+### Added（V2.2 阶段 4 新增）
+
+- **消纳率纯计算模块** `calculation/self_consumption.py`：按 §3.3 实现
+  `E_self=min(负荷,光伏)`、`E_export=max(光伏−负荷,0)`、`E_import=max(负荷−光伏,0)` 与
+  四项指标（光伏自用率 / 负荷覆盖率 / 光伏上网率 / 电网依赖率），
+  每项含**公式、分子、分母、单位、边界、统计口径**（`CALIBERS`，界面/Excel/PDF 三处同源）；
+  分母为 0 返回 `None`（"不适用"，不显示 0%）。
+- **月账单估算引擎** `calculation/load_estimate.py`：`E_i = E_month × w_i ÷ Σw_i`
+  （权重不是 kW），**每月严格回归**到输入月电量（残差 0.0，容差 `1e-6` kWh）；
+  4 种月电量来源、日类型优先级、周末/节假日/停产比例、班次裁剪、白天/夜间电量比例、
+  子小时均分假设，全部写入 `assumptions`。
+- **可编辑典型负荷模板** `domain/load_estimate.py`：内置 5 套（单班/双班/连续/工作日为主/办公型），
+  明确声明"模板是权重曲线，不是行业实测事实"。
+- **消纳结果模型** `domain/self_consumption_result.py`：§2.4 字段 + 逐月明细 +
+  口径列表 + 来源标签 + `assumption_lines()`；非实测来源而 `is_based_on_estimate=False` 直接报错。
+- **负荷画像** `calculation/load_portrait.py`：逐月电量/峰值/均值/负荷率（向量化分组）、
+  典型工作日/休息日/全部日曲线、年化估算。
+- **应用服务** `application/load_profile_service.py`：数据集登记/切换（**保留历史版本**）、
+  账单电量 → 估算输入、月账单估算、高频导入复用、光伏出力解析（复用 §9 引擎）、
+  消纳分析装配、逐月覆盖提示；`ProjectService.load_profile_service()` 只做装配。
+- **界面「负荷与消纳」页** `ui/load_pages.py`（A 数据来源 / B 负荷画像 / C 消纳分析）+
+  `ui/charts.py` 的 `LoadPvChart`、`MonthlyRateChart`；估算横幅**橙色**、实测横幅**绿色**；
+  输入变更即标记"结果已过期，请重新计算"。
+- **时间轴工具** `calculation/timeseries_engine.py::axis_from_timestamps`（纯追加）：
+  由任意时间戳序列构造 `TimeAxis`，支持部分年度真实数据。
+- **Excel「消纳率分析」表**（第 27 张）与 **PDF「五、负荷估算与光伏消纳」章节**（第 18 部分）：
+  四项指标 + 口径 + 逐月明细 + 假设 + 估算徽标；无数据时输出中文说明，不缺表/章节。
+- **测试**：`tests/test_self_consumption.py`、`tests/test_load_estimate.py`、
+  `tests/test_load_profile_service.py`、`tests/test_load_ui_report.py`。
+- **文档**：`V2.2_SELF_CONSUMPTION_SPEC.md`（口径、估算规则、真实资料实测与差异归因）。
+
+### Changed（V2.2 阶段 4，全部为追加式扩展）
+
+- `domain/models.py`：`Project` **追加** `load_datasets` / `active_load_dataset_id`
+  （默认空列表/空串，旧项目反序列化不受影响）。
+- `domain/enums.py`：**追加** `LoadEstimateSource`（月电量来源），既有成员未动。
+- `reports/pdf_exporter.py`：插入「负荷估算与光伏消纳」，后续章节编号顺延（内容不变）；
+  `build_story` / `export` 追加可选关键字参数 `self_consumption` / `load_portrait`。
+- `reports/excel_exporter.py`：`SHEET_NAMES` 追加「消纳率分析」；`export` 追加同样两个可选参数。
+- `ui/main_window.py`：追加「负荷与消纳」页签与服务装配；导出时把已算好的结果传给报告层。
+- `selftest.py` 与 6 个既有测试文件的"表数/章节数/页面数"断言同步（26→27、17→18、9→10 页）。
+
+---
+
 ## [Unreleased] — V2.1（阶段 2：账单页面与报告）
 
 > **定位**：把 V2.1 阶段 1 交付的账单能力（`domain/bill_models.py`、
