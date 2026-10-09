@@ -25,6 +25,11 @@ CURRENT_SCHEMA_VERSION = "2.0"
 #: 计算引擎版本（V2 §94：每次结果都要能追溯到引擎版本）
 CALCULATION_ENGINE_VERSION = "2.0.0"
 
+#: 账单段（``bills``）结构版本（V2.1 §8.2：对新数据添加 schema/version 版本标识）。
+#: 写在 ``.nep`` **信封**层（与 ``calculation_version`` / ``policy_version`` 同级），
+#: 不写进项目载荷——载荷按 ``Project`` 校验且 ``extra="forbid"``。
+BILL_SECTION_SCHEMA_VERSION = "1.0"
+
 #: 能够被迁移到当前版本的旧版本号
 LEGACY_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0", "1.1")
 
@@ -126,6 +131,10 @@ def migrate_project_payload(payload: dict[str, Any], from_version: str) -> Migra
     """把 ``from_version`` 的项目载荷迁移到当前版本。
 
     :raises MigrationError: 版本号未知或不受支持（例如 9.9）。
+
+    注意：**V2.1 的账单段补齐不在这里做**，而是由 :func:`ensure_bill_section` 单独完成。
+    这样本函数的既有契约（``from_version == CURRENT`` 时载荷原样返回）保持不变，
+    V2 的迁移测试与行为不受影响。
     """
     if from_version == CURRENT_SCHEMA_VERSION:
         return MigrationOutcome(payload=dict(payload), from_version=from_version)
@@ -147,13 +156,52 @@ def migrate_project_payload(payload: dict[str, Any], from_version: str) -> Migra
     )
 
 
+# --------------------------------------------------------------------------- #
+# V2.1 §2.1、§8.2 账单段补齐
+# --------------------------------------------------------------------------- #
+def ensure_bill_section(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """确保项目载荷含**显式**的 ``bills`` 段（V2.1 §8.2）。
+
+    只做一件事：旧项目（V1 或 V2.0，载荷里没有 ``bills``）补一个**空列表**，
+    并在 ``migration_notes`` 里留痕。
+
+    绝不做的事（V2.1 §8.2 明令）：
+
+    * **不**为旧项目生成任何"虚构账单数据"——空列表表示"该项目还没有账单"；
+    * **不**改动 ``bills`` 已存在时的任何内容（哪怕内容为空或格式更旧）；
+    * **不**改动任何既有参数。
+
+    :return: ``(载荷, 说明列表)``；载荷本就含 ``bills`` 时原样返回、说明为空。
+    """
+    out = dict(payload)
+    notes: list[str] = []
+    if "bills" in out:
+        return out, notes
+
+    out["bills"] = []
+    notes.append(
+        "补充 V2.1 新增段 bills（显式空列表：旧项目不自动生成任何账单数据，"
+        "打开后账单页显示空状态）"
+    )
+    existing_notes = out.get("migration_notes")
+    if not isinstance(existing_notes, list):
+        existing_notes = []
+    out["migration_notes"] = [
+        *existing_notes,
+        "已为 V2.1 账单功能补齐空 bills 段；既有参数与计算结果口径未改变。",
+    ]
+    return out, notes
+
+
 __all__ = [
+    "BILL_SECTION_SCHEMA_VERSION",
     "CALCULATION_ENGINE_VERSION",
     "CURRENT_SCHEMA_VERSION",
     "LEGACY_SCHEMA_VERSIONS",
     "SUPPORTED_SCHEMA_VERSIONS",
     "MigrationError",
     "MigrationOutcome",
+    "ensure_bill_section",
     "migrate_project_payload",
     "migrate_v1_to_v2",
 ]

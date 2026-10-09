@@ -78,7 +78,8 @@ CalculationResult                ← 唯一结果对象（§81）
 | `scenario` | `ScenarioConfig` | `ScenarioConfig()` | 情景分析配置 |
 | `sensitivity` | `SensitivityConfig` | `SensitivityConfig()` | 敏感性分析配置 |
 | `timeseries` | `TimeSeriesConfig` | `TimeSeriesConfig()` | **V2 时序仿真配置**（默认 `enabled=False`，走 V1 年度模式；字段字典见 `TIMESERIES_MODEL.md`） |
-| `migration_notes` | `list[str]` | `[]` | **V2**：V1→V2 迁移留痕（既有参数未被修改的说明） |
+| `bills` | `list[ElectricityBill]` | `[]` | **V2.1 月电费账单事实**（手动录入 / Excel 导入）。默认空列表：旧 `.nep` 打开后账单为空，不虚构数据。字段字典见 `bill_models.py`；**账单模拟结果另建模型**，不得混入本列表 |
+| `migration_notes` | `list[str]` | `[]` | **V2**：V1→V2 迁移留痕（既有参数未被修改的说明；V2.1 补账单段时也会追加一条） |
 | `analysis_period` | `int` | `25` | 项目生命周期（年，§15） |
 | `discount_rate` | `float` | `0.08` | 折现率（§72） |
 | `parameter_registry` | `dict[str, ParameterMeta]` | `{}` | 参数来源登记表 |
@@ -749,6 +750,7 @@ validate_storage_balance(annual_results, tolerance=1e-6)
 | `calculation_version` | 常量 `CALCULATION_ENGINE_VERSION` | **V2 §95**：`"2.0.0"`，供历史结果追溯（V2 §94） |
 | `policy_version` | `project.policy.profile_id` | 无政策时为空串 |
 | `tariff_version` | `project.tariff.tariff_version` | 电价参数版本 |
+| `bills_schema_version` | 常量 `migration.BILL_SECTION_SCHEMA_VERSION` | **V2.1 §8.2**：账单段结构版本（`"1.0"`）。与 `calculation_version` 同级；旧读方忽略未知信封键，不受影响 |
 | `saved_at` | `datetime.now().isoformat(timespec="seconds")` | 保存时间（**不参与幂等比较**，见 7.4） |
 | `project` | `project.model_dump(mode="json")` | `Project` 的完整 JSON 化字典 |
 
@@ -764,7 +766,7 @@ validate_storage_balance(annual_results, tolerance=1e-6)
 
 ### 7.2 `project` 字段构成
 
-`project` 是 `Project` 的完整字典（见 2.1 节全部字段，V2 共 18 个字段）。序列化时的典型形态：
+`project` 是 `Project` 的完整字典（见 2.1 节全部字段，V2.0 共 18 个字段；V2.1 追加 `bills` 后共 19 个）。序列化时的典型形态：
 
 | 子对象 | 序列化形态 |
 |---|---|
@@ -853,8 +855,9 @@ os.replace(tmp, path)        # 原子替换；finally 中清理残留 .tmp
 | 项 | 现状 |
 |---|---|
 | 当前版本 | 写入 `schema_version = "2.0"`（`migration.CURRENT_SCHEMA_VERSION`） |
-| `1.0` / `1.1` | ✅ **自动迁移**为 `2.0`：只补 `timeseries` 段的**显式默认值**、更新版本号、追加 `migration_notes`；**不改动任何既有参数、不重算、不删字段** |
-| `2.0` | ✅ 直接打开 |
+| `1.0` / `1.1` | ✅ **自动迁移**为 `2.0`：只补 `timeseries` 段的**显式默认值**、更新版本号、追加 `migration_notes`；**不改动任何既有参数、不重算、不删字段**。V2.1 起再补一次空 `bills` 段（`ensure_bill_section()`） |
+| `2.0` | ✅ 直接打开；缺 `bills` 键时补**显式空列表**并追加 `migration_notes`（幂等：已有 `bills` 时不写任何说明） |
+| V2.1 账单段 | ✅ **不升 `schema_version`**：账单是可选新增段（默认 `[]`），段结构版本写在信封 `bills_schema_version`（`"1.0"`）。因此 V2.0 与 V2.1 共用 `schema_version="2.0"`，双向可读 |
 | 其它 / 缺失 | ❌ 拒绝加载，给中文提示并列出可迁移版本（`MigrationError`，**不猜测**） |
 | 迁移留痕 | `Project.migration_notes: list[str]`，报告与界面均可展示"这个项目从哪个版本迁过来" |
 | 未知字段 | `extra="forbid"` 导致加载失败；因此新增字段**必须给默认值** |

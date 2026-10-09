@@ -32,8 +32,10 @@ import logging
 
 import numpy as np
 
+from ..calculation.bill_calculator import reconcile_bill
 from ..calculation.timeseries_engine import TimeAxis
-from ..domain.enums import SourceType
+from ..domain.bill_models import BillQualityScore, BillTolerance, ElectricityBill
+from ..domain.enums import BillQualityStatus, SourceType, TariffStructure
 from ..domain.timeseries import TimeSeriesPoint
 from ..domain.timeseries_results import DataQualityIssue, DataQualityScore
 from .validator import VALUE_FIELD, validate_series
@@ -41,12 +43,17 @@ from .validator import VALUE_FIELD, validate_series
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "BILL_CORE_FIELDS",
+    "BILL_WEIGHT_COMPLETENESS",
+    "BILL_WEIGHT_CONSISTENCY",
+    "BILL_WEIGHT_SOURCE",
     "OUTLIER_ZERO_RATE",
     "SOURCE_CREDIBILITY",
     "WEIGHT_COMPLETENESS",
     "WEIGHT_CONTINUITY",
     "WEIGHT_OUTLIER",
     "WEIGHT_SOURCE",
+    "score_bill_quality",
     "score_quality",
     "source_credibility_of",
 ]
@@ -200,5 +207,98 @@ def score_quality(
         score.source_credibility,
         score.score,
         level_of(score.score),
+    )
+    return score
+
+
+# --------------------------------------------------------------------------- #
+# V2.1 §5.5 账单数据质量评分（增量：不改动上面的时序评分逻辑）
+# --------------------------------------------------------------------------- #
+#: 账单评分三个维度的满分（V2.1 §5.5；沿用 V2 §56 的"文档即契约"做法）
+BILL_WEIGHT_COMPLETENESS = 50.0   # 关键字段提供了多少
+BILL_WEIGHT_CONSISTENCY = 35.0    # ΔE / ΔC / 电度二层核对通过了多少
+BILL_WEIGHT_SOURCE = 15.0         # 来源可信度（复用 §8.2 分值表）
+
+#: 账单"关键字段"：缺失会让后续分析无法进行（V2.1 §2.1、§3.1）
+BILL_CORE_FIELDS: tuple[str, ...] = (
+    "energy_total_kwh",
+    "bill_total_yuan",
+    "energy_charge_yuan",
+    "voltage_level",
+    "tariff_structure",
+)
+
+
+def score_bill_quality(
+    bill: ElectricityBill, *, tolerance: BillTolerance | None = None
+) -> BillQualityScore:
+    """账单数据质量评分（V2.1 §5.5）。
+
+    计分（满分 100）::
+
+        完整性 = 50 × 已提供关键字段数 / 关键字段总数
+        一致性 = 35 × 通过的核对项 / 可判断的核对项
+                 （可判断项为 0 时按满分 35 计，避免"没数据"被当成"数据很差"）
+        来源   = 15 × 来源可信度 / 15（复用 §8.2 的分值表）
+
+    ``tariff_structure`` 只有非 ``unknown`` 才算提供；
+    两部制账单额外要求"合同容量或计费需量至少有一个"。
+
+    ``status`` **不由分数决定**，而由问题级别决定（任一 ERROR → 无效），
+    防止用高分掩盖"分项合计不一致""存在负值"这类硬问题。
+    """
+    tol = tolerance or BillTolerance()
+    outcome = reconcile_bill(bill, tolerance=tol)
+
+    # ---- 完整性 ----
+    total_fields = len(BILL_CORE_FIELDS)
+    provided = 0
+    for name in BILL_CORE_FIELDS:
+        value = getattr(bill, name, None)
+        if name == "tariff_structure":
+            provided += int(value is not None and value is not TariffStructure.UNKNOWN)
+        else:
+            provided += int(value is not None and value != "")
+    if bill.tariff_structure is TariffStructure.TWO_PART:
+        total_fields += 1
+        provided += int(
+            bill.contract_capacity_kva is not None or bill.billing_demand_kw is not None
+        )
+    completeness = BILL_WEIGHT_COMPLETENESS * provided / total_fields if total_fields else 0.0
+
+    # ---- 一致性 ----
+    checks = [
+        outcome.energy_consistent,
+        outcome.amount_consistent,
+        outcome.energy_sub_consistent,
+    ]
+    judgeable = [c for c in checks if c is not None]
+    if judgeable:
+        consistency = BILL_WEIGHT_CONSISTENCY * sum(1 for c in judgeable if c) / len(judgeable)
+    else:
+        consistency = BILL_WEIGHT_CONSISTENCY  # 无可判断项：不奖不罚
+    completeness = min(completeness, BILL_WEIGHT_COMPLETENESS)
+
+    # ---- 来源 ----
+    # §8.2 的分值表本身就是 0–15 分制，直接作为来源维度得分
+    source_score = source_credibility_of(bill.source_type.parameter_source)
+
+    score = BillQualityScore(
+        score=round(min(completeness + consistency + source_score, 100.0), 4),
+        completeness=round(completeness, 4),
+        consistency=round(consistency, 4),
+        source_credibility=round(source_score, 4),
+        status=outcome.quality_status,
+        issues=list(outcome.issues),
+    )
+    logger.debug(
+        "账单质量评分：%s 来源=%s → 完整性 %.2f 一致性 %.2f 来源 %.2f 总分 %.2f（%s）",
+        bill.bill_id,
+        bill.source_type.value,
+        score.completeness,
+        score.consistency,
+        score.source_credibility,
+        score.score,
+        score.status.label,
     )
     return score

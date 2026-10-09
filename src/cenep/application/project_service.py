@@ -113,3 +113,19 @@ class ProjectService:
         if self.db is None:
             return []
         return self.db.recent_projects(limit)
+
+    # ------------------------------------------------------------------ #
+    # V2.1 账单服务装配（§5.2）
+    # ------------------------------------------------------------------ #
+    def bill_service(self, project: Project, **kwargs):
+        """返回该项目的账单服务（V2.1 §5.2）。
+
+        只做**装配**，不复制任何账单逻辑：录入 / 校验 / 导入 / 汇总全部在
+        :class:`cenep.application.bill_service.BillService` 内实现，
+        界面（阶段 2）通过本方法拿到服务，避免各处自行拼装。
+
+        :param kwargs: 透传给 ``BillService``（如 ``project_id``、``tolerance``）
+        """
+        from .bill_service import BillService
+
+        return BillService(project, **kwargs)

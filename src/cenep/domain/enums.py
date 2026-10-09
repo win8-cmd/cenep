@@ -439,3 +439,158 @@ class MissingDataPolicy(StrEnum):
             MissingDataPolicy.FORWARD_FILL: "前值填充",
             MissingDataPolicy.TYPICAL_DAY_FILL: "典型日填充",
         }[self]
+
+
+# --------------------------------------------------------------------------- #
+# V2.1 §2.1 月电费账单事实
+# --------------------------------------------------------------------------- #
+# 说明（增量开发约束 V2.1 §0.2）：
+# 以下枚举为 **V2.1 新增**，仅追加在文件末尾，未修改任何既有枚举的成员或取值，
+# 因此 V2 的公开接口与既有序列化数据完全不受影响。
+#
+# 与既有枚举的命名差异：本文件的既有枚举取值用 ``UPPER_CASE``（如
+# ``TariffPeriod.SHARP_PEAK``），而账单三类的取值必须保持 V2.1 §2.1 规定的
+# ``snake_case`` 字面量（``single_part`` / ``two_part`` / ``unknown`` /
+# ``manual`` / ``excel`` / ``estimated`` / ``valid`` / ``warning`` / ``invalid``），
+# 因为它们是账单模型对外的字段契约。中文名一律通过 :attr:`label` 提供。
+# --------------------------------------------------------------------------- #
+class TariffStructure(StrEnum):
+    """计费方式：单一制 / 两部制 / 未知（V2.1 §2.1）。"""
+
+    SINGLE_PART = "single_part"
+    TWO_PART = "two_part"
+    UNKNOWN = "unknown"
+
+    @property
+    def label(self) -> str:
+        return {
+            TariffStructure.SINGLE_PART: "单一制",
+            TariffStructure.TWO_PART: "两部制",
+            TariffStructure.UNKNOWN: "未知",
+        }[self]
+
+    @property
+    def is_two_part(self) -> bool:
+        """是否两部制（两部制才有基本电费：容量电费或需量电费，§3.4）。"""
+        return self is TariffStructure.TWO_PART
+
+
+class BillSourceType(StrEnum):
+    """账单事实的数据来源（V2.1 §2.1）。
+
+    ``estimated`` 只用于"用户明确标注为估算的账单"，**不得**用它给 Excel 导入或
+    手动录入的数据打标（V2.1 §0.2：估算与实测必须可区分）。
+    """
+
+    MANUAL = "manual"
+    EXCEL = "excel"
+    ESTIMATED = "estimated"
+
+    @property
+    def label(self) -> str:
+        return {
+            BillSourceType.MANUAL: "手动录入",
+            BillSourceType.EXCEL: "Excel 导入",
+            BillSourceType.ESTIMATED: "估算",
+        }[self]
+
+    @property
+    def parameter_source(self) -> SourceType:
+        """映射到既有来源枚举（规范 §84、§91），供质量评分与报告复用。
+
+        ``manual`` / ``excel`` 都是用户提供的账单事实，按"用户输入"计；
+        ``estimated`` 是估算，必须按"假设值"计（不得与事实同分）。
+        """
+        return {
+            BillSourceType.MANUAL: SourceType.USER_INPUT,
+            BillSourceType.EXCEL: SourceType.USER_INPUT,
+            BillSourceType.ESTIMATED: SourceType.ASSUMPTION,
+        }[self]
+
+
+class BillQualityStatus(StrEnum):
+    """账单数据质量状态（V2.1 §2.1、§5.5）。"""
+
+    VALID = "valid"
+    WARNING = "warning"
+    INVALID = "invalid"
+
+    @property
+    def label(self) -> str:
+        return {
+            BillQualityStatus.VALID: "有效",
+            BillQualityStatus.WARNING: "有警告",
+            BillQualityStatus.INVALID: "无效",
+        }[self]
+
+
+class BillEnergyPeriod(StrEnum):
+    """账单分时电量时段（V2.1 §2.1、§3.1）。
+
+    **命名约定（§2.1 明确要求"统一枚举定义"）**：
+
+    * ``valley`` = **低谷**（谷段）；
+    * ``offpeak`` = **深谷**，与低谷**不是**同一时段，不得理解为低谷的同义词；
+    * ``flat`` = 平段，因此不得把 ``offpeak`` 读成"非峰段/平段"。
+
+    与政策侧时段枚举 :class:`TariffPeriod` 的对应关系见 :attr:`tariff_period`，
+    保证账单事实与政策时段规则使用同一套语义（§0.2：时段规则与电价数值分离）。
+    """
+
+    SHARP = "sharp"
+    PEAK = "peak"
+    FLAT = "flat"
+    VALLEY = "valley"
+    OFFPEAK = "offpeak"
+
+    @property
+    def label(self) -> str:
+        return {
+            BillEnergyPeriod.SHARP: "尖峰",
+            BillEnergyPeriod.PEAK: "高峰",
+            BillEnergyPeriod.FLAT: "平段",
+            BillEnergyPeriod.VALLEY: "低谷",
+            BillEnergyPeriod.OFFPEAK: "深谷",
+        }[self]
+
+    @property
+    def field_name(self) -> str:
+        """:class:`~cenep.domain.bill_models.ElectricityBill` 中对应的字段名。"""
+        return {
+            BillEnergyPeriod.SHARP: "energy_sharp_kwh",
+            BillEnergyPeriod.PEAK: "energy_peak_kwh",
+            BillEnergyPeriod.FLAT: "energy_flat_kwh",
+            BillEnergyPeriod.VALLEY: "energy_valley_kwh",
+            BillEnergyPeriod.OFFPEAK: "energy_offpeak_kwh",
+        }[self]
+
+    @property
+    def tariff_period(self) -> TariffPeriod:
+        """映射到政策侧时段（V2 §3 P0.4、§17.1）。"""
+        return {
+            BillEnergyPeriod.SHARP: TariffPeriod.SHARP_PEAK,
+            BillEnergyPeriod.PEAK: TariffPeriod.PEAK,
+            BillEnergyPeriod.FLAT: TariffPeriod.FLAT,
+            BillEnergyPeriod.VALLEY: TariffPeriod.VALLEY,
+            BillEnergyPeriod.OFFPEAK: TariffPeriod.DEEP_VALLEY,
+        }[self]
+
+
+class DuplicateStrategy(StrEnum):
+    """重复账单处理策略（V2.1 §5.5：跳过 / 替换 / 保留）。
+
+    重复的判定口径见 :func:`cenep.domain.bill_models.duplicate_key`：
+    **项目 + 账期（起止日期）+ 计量点**。
+    """
+
+    SKIP = "skip"
+    REPLACE = "replace"
+    KEEP_BOTH = "keep_both"
+
+    @property
+    def label(self) -> str:
+        return {
+            DuplicateStrategy.SKIP: "跳过已存在的账单",
+            DuplicateStrategy.REPLACE: "用新导入的替换旧账单",
+            DuplicateStrategy.KEEP_BOTH: "两条都保留",
+        }[self]

@@ -6,6 +6,9 @@
 * :mod:`cenep.data.validator` —— 时间轴与数值校验、缺失处理（§52–§54）
 * :mod:`cenep.data.quality`   —— ``DataQualityScore`` 评分（§55、§56）
 
+V2.1 增量接入（§5.3、§5.5）：新增账单模板 / 列映射 / 导入预览与账单质量评分，
+既有函数签名与行为完全不变。
+
 典型用法::
 
     from cenep.data import import_load_file, build_time_axis, validate_series, score_quality
@@ -15,20 +18,46 @@
     issues = validate_series(profile.points, axis, kind="load")
     quality = score_quality(profile.points, axis, issues=issues,
                             source_type=profile.source_type)
+
+账单导入（V2.1）::
+
+    from cenep.data import build_bill_template, preview_bill_import, apply_bill_import
+
+    build_bill_template("账单模板.xlsx")
+    preview = preview_bill_import("账单.xlsx", project_id="某项目")
+    result = apply_bill_import(preview, strategy=DuplicateStrategy.SKIP)
 """
 
 from __future__ import annotations
 
 from ..calculation.timeseries_engine import TimeAxis, build_time_axis, points_per_year
+from .bill_importer import (
+    DEFAULT_SHEET,
+    SHEET_BILLS,
+    SHEET_DICT,
+    SHEET_HELP,
+    SHEET_TARIFF,
+    TEMPLATE_FILE_NAME,
+    BillImportPreview,
+    BillImportResult,
+    BillImportRow,
+    apply_bill_import,
+    bill_template_bytes,
+    build_bill_template,
+    preview_bill_import,
+    resolve_bill_columns,
+)
 from .importer import (
     COLUMN_ALIASES,
     detect_unit_issues,
     import_load_file,
     import_pv_file,
     import_tariff_file,
+    list_sheets,
     normalize_header,
     parse_timestamp,
     read_table,
+    read_table_from_sheet,
 )
 from .quality import (
     SOURCE_CREDIBILITY,
@@ -37,6 +66,7 @@ from .quality import (
     WEIGHT_OUTLIER,
     WEIGHT_SOURCE,
     level_of,
+    score_bill_quality,
     score_quality,
     source_credibility_of,
 )
@@ -56,9 +86,11 @@ __all__ = [
     "import_load_file",
     "import_pv_file",
     "import_tariff_file",
+    "list_sheets",
     "normalize_header",
     "parse_timestamp",
     "read_table",
+    "read_table_from_sheet",
     # 校验（§52–§54）
     "check_timeline_consistency",
     "detect_duplicates",
@@ -73,10 +105,26 @@ __all__ = [
     "WEIGHT_OUTLIER",
     "WEIGHT_SOURCE",
     "level_of",
+    "score_bill_quality",
     "score_quality",
     "source_credibility_of",
     # 时间轴（便于调用方一次导入）
     "TimeAxis",
     "build_time_axis",
     "points_per_year",
+    # V2.1 账单模板 / 导入预览（§5.3、§5.5）
+    "DEFAULT_SHEET",
+    "SHEET_BILLS",
+    "SHEET_DICT",
+    "SHEET_HELP",
+    "SHEET_TARIFF",
+    "TEMPLATE_FILE_NAME",
+    "BillImportPreview",
+    "BillImportResult",
+    "BillImportRow",
+    "apply_bill_import",
+    "bill_template_bytes",
+    "build_bill_template",
+    "preview_bill_import",
+    "resolve_bill_columns",
 ]

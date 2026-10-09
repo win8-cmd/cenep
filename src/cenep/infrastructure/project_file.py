@@ -29,10 +29,12 @@ from pathlib import Path
 from .. import __version__
 from ..domain.models import Project
 from .migration import (
+    BILL_SECTION_SCHEMA_VERSION,
     CALCULATION_ENGINE_VERSION,
     CURRENT_SCHEMA_VERSION,
     LEGACY_SCHEMA_VERSIONS,
     MigrationError,
+    ensure_bill_section,
     migrate_project_payload,
 )
 from .logging_setup import get_logger
@@ -113,6 +115,8 @@ def save_project(project: Project, path: str | Path) -> Path:
         if hasattr(project.tariff, "tariff_version")
         else "",
         "saved_at": datetime.now().isoformat(timespec="seconds"),
+        # V2.1 §8.2：新增数据（账单段）必须带 schema/version 版本标识
+        "bills_schema_version": BILL_SECTION_SCHEMA_VERSION,
         "project": project.model_dump(mode="json"),
     }
     try:
@@ -162,8 +166,13 @@ def load_project(path: str | Path) -> Project:
             len(outcome.notes),
         )
 
+    # V2.1 §8.2：旧项目缺少账单段时补**显式空列表**（不生成任何虚构账单数据）
+    payload, bill_notes = ensure_bill_section(outcome.payload)
+    if bill_notes:
+        logger.info("项目文件补齐账单段：%s", "；".join(bill_notes))
+
     try:
-        return Project.model_validate(outcome.payload)
+        return Project.model_validate(payload)
     except Exception as exc:  # pydantic ValidationError 等
         raise ProjectFileError(f"项目内容校验失败：{exc}", source) from exc
 

@@ -22,6 +22,10 @@
   导入函数会把它写进日志；如需把提示并入统一的质量报告，
   在 :func:`cenep.data.validator.validate_series` 里会再次检出（V09）。
 * **缺列 / 空文件 / 全空列** → 中文错误（``ValidationError``）。
+* **V2.1 新增（增量，不改既有行为）**：:func:`list_sheets` 列出工作表名、
+  :func:`read_table_from_sheet` 按指定工作表读表（V2.1 §5.3 的"选择工作表"步骤），
+  并把损坏的 ``.xlsx`` 统一翻译成中文 ``ValidationError``（V2.1 §9.1、§0.2）。
+  :func:`read_table` 的行为与 V2 完全一致（仍读第一张工作表）。
 """
 
 from __future__ import annotations
@@ -47,9 +51,11 @@ __all__ = [
     "import_load_file",
     "import_pv_file",
     "import_tariff_file",
+    "list_sheets",
     "normalize_header",
     "parse_timestamp",
     "read_table",
+    "read_table_from_sheet",
 ]
 
 #: Excel 日期序列号的基准（1900 日期系统的第 1 天是 1900-01-01，
@@ -192,7 +198,13 @@ def _read_csv(path: Path) -> list[dict[str, Any]]:
     )
 
 
-def _read_xlsx(path: Path) -> list[dict[str, Any]]:
+def _open_workbook(path: Path):
+    """打开 ``.xlsx`` 工作簿；损坏文件转成**中文** ``ValidationError``（V2.1 §9.1）。
+
+    在 V2.1 之前，非 zip / 损坏的 ``.xlsx`` 会让 ``openpyxl`` 抛出
+    ``BadZipFile`` 这类裸异常直接冒到界面上（V2.1 §0.2 明令禁止）。
+    这里统一翻译成中文提示，并保留原始异常作为 ``__cause__`` 供日志排查。
+    """
     try:
         from openpyxl import load_workbook
     except ImportError as exc:  # pragma: no cover - 依赖缺失时给出可读提示
@@ -200,22 +212,158 @@ def _read_xlsx(path: Path) -> list[dict[str, Any]]:
             "读取 .xlsx 需要 openpyxl，请先安装该依赖", field="data.import.openpyxl"
         ) from exc
 
-    workbook = load_workbook(path, data_only=True, read_only=True)
     try:
-        sheet = workbook[workbook.sheetnames[0]]
-        rows = list(sheet.iter_rows(values_only=True))
+        return load_workbook(path, data_only=True, read_only=True)
+    except Exception as exc:  # noqa: BLE001 - 统一翻译为中文提示（BadZipFile / InvalidFileException / OSError）
+        raise ValidationError(
+            f"文件「{path.name}」不是有效的 Excel 工作簿（可能已损坏、被占用或不是 .xlsx 格式）：{exc}",
+            field="data.import.corrupt",
+        ) from exc
+
+
+def _rows_to_dicts(
+    rows: list[tuple],
+    *,
+    path: Path,
+    sheet_name: str,
+    first_row: int = 1,
+    with_row_numbers: bool = False,
+) -> list[dict[str, Any]] | list[tuple[int, dict[str, Any]]]:
+    """把"首行为表头"的二维表转成 ``list[dict]``，跳过全空行。
+
+    ``with_row_numbers=True`` 时返回 ``[(文件行号, 行字典), …]``，
+    供导入预览给出**与源文件一致的行号**（跳过空行后行号仍不漂移，V2.1 §5.5）。
+    """
+    if not rows:
+        raise ValidationError(
+            f"工作表「{sheet_name}」没有可用的表头行（文件「{path.name}」为空）",
+            field="data.import.header",
+        )
+    headers = ["" if h is None else str(h) for h in rows[0]]
+    out: list[dict[str, Any]] = []
+    numbered: list[tuple[int, dict[str, Any]]] = []
+    for offset, row in enumerate(rows[1:], start=1):
+        if row is None or all(cell is None or str(cell).strip() == "" for cell in row):
+            continue
+        record = {headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))}
+        out.append(record)
+        numbered.append((first_row + offset, record))
+    return numbered if with_row_numbers else out
+
+
+def list_sheets(path: str | Path) -> list[str]:
+    """列出文件包含的工作表名（V2.1 §5.3：导入时要让用户选择工作表）。
+
+    ``.csv`` / ``.txt`` 只有一个"表"，返回文件名本身，便于界面统一处理。
+
+    :raises ValidationError: 文件不存在、扩展名不支持、工作簿损坏
+    """
+    target = Path(path)
+    if not target.exists():
+        raise ValidationError(f"文件不存在：{target}", field="data.import.path")
+    suffix = target.suffix.lower()
+    if suffix in (".xlsx", ".xlsm"):
+        workbook = _open_workbook(target)
+        try:
+            return list(workbook.sheetnames)
+        finally:
+            workbook.close()
+    if suffix in (".csv", ".txt"):
+        return [target.name]
+    raise ValidationError(
+        f"不支持的文件类型「{suffix}」，请使用 .xlsx 或 .csv", field="data.import.suffix"
+    )
+
+
+def read_table_from_sheet(
+    path: str | Path,
+    sheet: str | None = None,
+    *,
+    header_row: int = 1,
+    with_row_numbers: bool = False,
+) -> list[dict[str, Any]] | list[tuple[int, dict[str, Any]]]:
+    """按**指定工作表**读表（V2.1 §5.3；V2 的 :func:`read_table` 只读第一个表）。
+
+    与 :func:`read_table` 的差异仅在"选哪张表"：``sheet=None`` 时仍取第一张工作表，
+    因此既有调用方的行为完全不变。
+
+    :param sheet: 工作表名；``None`` = 第一张工作表。名称不存在时报中文错误并列出可用工作表。
+    :param header_row: 表头所在行（从 1 开始）。
+    :param with_row_numbers: ``True`` 时返回 ``[(文件行号, 行字典), …]``，
+        供导入预览定位到源文件行号（V2.1 §5.5）。``.csv`` 不支持 ``header_row``，
+        行号一律按物理行计算。
+    :raises ValidationError: 文件不存在、扩展名不支持、工作表不存在、空表、工作簿损坏
+    """
+    target = Path(path)
+    if not target.exists():
+        raise ValidationError(f"文件不存在：{target}", field="data.import.path")
+    suffix = target.suffix.lower()
+    start_row = max(int(header_row), 1)
+
+    if suffix in (".csv", ".txt"):
+        records = _read_csv(target)
+        if not records:
+            raise ValidationError(
+                f"文件「{target.name}」没有数据行（只有表头或完全为空）", field="data.import.empty"
+            )
+        if with_row_numbers:
+            # DictReader 已消费表头，第 1 条数据对应物理行 2；完全空白行被 DictReader 跳过，
+            # 因此行号在含大量空行的 CSV 上可能有偏差（Excel 导入不受影响）
+            return [(index + 2, record) for index, record in enumerate(records)]
+        return records
+
+    if suffix not in (".xlsx", ".xlsm"):
+        raise ValidationError(
+            f"不支持的文件类型「{suffix}」，请使用 .xlsx 或 .csv", field="data.import.suffix"
+        )
+
+    workbook = _open_workbook(target)
+    try:
+        names = list(workbook.sheetnames)
+        if sheet is None:
+            sheet_name = names[0]
+        elif sheet in names:
+            sheet_name = sheet
+        else:
+            raise ValidationError(
+                f"工作表「{sheet}」不存在；文件「{target.name}」包含的工作表："
+                f"{'、'.join(names) if names else '（无）'}",
+                field="data.import.sheet",
+            )
+        worksheet = workbook[sheet_name]
+        rows = list(worksheet.iter_rows(min_row=start_row, values_only=True))
     finally:
         workbook.close()
 
     if not rows:
+        raise ValidationError(
+            f"工作表「{sheet_name}」没有数据行（只有表头或完全为空）", field="data.import.empty"
+        )
+    table = _rows_to_dicts(
+        rows,
+        path=target,
+        sheet_name=sheet_name,
+        first_row=start_row,
+        with_row_numbers=with_row_numbers,
+    )
+    if not table:
+        raise ValidationError(
+            f"工作表「{sheet_name}」没有数据行（只有表头或完全为空）", field="data.import.empty"
+        )
+    return table
+
+
+def _read_xlsx(path: Path) -> list[dict[str, Any]]:
+    """读取 ``.xlsx`` 的第一张工作表（兼容 V2 既有行为）。"""
+    workbook = _open_workbook(path)
+    try:
+        sheet_name = workbook.sheetnames[0]
+        rows = list(workbook[sheet_name].iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    if not rows:
         return []
-    headers = ["" if h is None else str(h) for h in rows[0]]
-    out: list[dict[str, Any]] = []
-    for row in rows[1:]:
-        if row is None or all(cell is None or str(cell).strip() == "" for cell in row):
-            continue
-        out.append({headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))})
-    return out
+    return _rows_to_dicts(rows, path=path, sheet_name=sheet_name)
 
 
 def read_table(path: str | Path) -> list[dict[str, Any]]:

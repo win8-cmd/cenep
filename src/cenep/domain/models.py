@@ -16,6 +16,7 @@ from datetime import date
 from pydantic import Field, model_validator
 
 from .base import NON_NEG, RATIO, _Model
+from .bill_models import ElectricityBill
 from .enums import (
     DepreciationMethod,
     InvestmentMode,
@@ -455,6 +456,13 @@ class Project(_Model):
     # V2 时序仿真配置（V2 §3、§6）。默认 enabled=False：完全走 V1 年度模式，
     # 保证 V1 项目打开后行为与结果不变（V2 §1.1）。
     timeseries: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
+
+    # V2.1 §2.1 月电费账单**事实**（手动录入或 Excel 导入）。
+    # 默认空列表：旧项目（V1 / V2.0）打开后账单页显示空状态，不生成任何虚构账单（V2.1 §8.2）。
+    # 注意：这里只放"账单事实"；账单**模拟结果**必须另建模型，不得混入本列表（V2.1 §0.2）。
+    bills: list[ElectricityBill] = Field(
+        default_factory=list, description="月电费账单事实列表（V2.1 §2.1）"
+    )
 
     analysis_period: int = Field(default=25, gt=0, le=40, description="项目生命周期（年，规范 §15）")
     discount_rate: float = Field(default=0.08, ge=0.0, le=0.5, description="折现率（规范 §72）")
