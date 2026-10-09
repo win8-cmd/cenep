@@ -26,6 +26,14 @@ V2.1 增量接入（§5.3、§5.5）：新增账单模板 / 列映射 / 导入�
     build_bill_template("账单模板.xlsx")
     preview = preview_bill_import("账单.xlsx", project_id="某项目")
     result = apply_bill_import(preview, strategy=DuplicateStrategy.SKIP)
+
+高频负荷导入（V2.2 阶段 3）::
+
+    from cenep.data import preview_load_import, apply_load_import
+
+    preview = preview_load_import("15分钟负荷.xlsx", value_kind=None)  # 口径按表头判定
+    dataset = apply_load_import(preview, project_id="某项目")
+    print(dataset.provenance_text, dataset.quality_summary_text())
 """
 
 from __future__ import annotations
@@ -58,6 +66,31 @@ from .importer import (
     parse_timestamp,
     read_table,
     read_table_from_sheet,
+)
+from .load_profile_importer import (
+    COVERAGE_WARNING_RATIO,
+    LOAD_COLUMNS,
+    LOAD_COLUMN_ALIASES,
+    AlignmentResult,
+    IntervalDetection,
+    LoadColumn,
+    LoadImportPreview,
+    LoadImportRow,
+    TimeBlock,
+    align_timestamps,
+    apply_load_import,
+    build_points_from_block,
+    check_load_quality,
+    detect_interval,
+    detect_value_kind_from_header,
+    expected_year_from_file_name,
+    load_block_catalog,
+    preview_block_import,
+    preview_load_import,
+    read_time_blocks,
+    resolve_load_columns,
+    resolve_value_kind,
+    scan_timezone_issues,
 )
 from .quality import (
     SOURCE_CREDIBILITY,
@@ -127,4 +160,28 @@ __all__ = [
     "build_bill_template",
     "preview_bill_import",
     "resolve_bill_columns",
+    # V2.2 阶段 3 高频负荷导入 / 间隔识别 / 质量检查
+    "COVERAGE_WARNING_RATIO",
+    "LOAD_COLUMNS",
+    "LOAD_COLUMN_ALIASES",
+    "AlignmentResult",
+    "IntervalDetection",
+    "LoadColumn",
+    "LoadImportPreview",
+    "LoadImportRow",
+    "TimeBlock",
+    "align_timestamps",
+    "apply_load_import",
+    "build_points_from_block",
+    "check_load_quality",
+    "detect_interval",
+    "detect_value_kind_from_header",
+    "expected_year_from_file_name",
+    "load_block_catalog",
+    "preview_block_import",
+    "preview_load_import",
+    "read_time_blocks",
+    "resolve_load_columns",
+    "resolve_value_kind",
+    "scan_timezone_issues",
 ]

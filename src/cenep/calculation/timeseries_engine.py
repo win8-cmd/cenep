@@ -34,10 +34,16 @@ def is_leap_year(year: int) -> bool:
 
 
 def points_per_year(year: int, resolution: Resolution = Resolution.HOURLY) -> int:
-    """给定年份与分辨率的点数（平年 / 闰年自动区分）。"""
+    """给定年份与分辨率的点数（平年 / 闰年自动区分）。
+
+    V2.2 阶段 3 增量：支持 30 分钟（``HALF_HOURLY``）—— 平年 17520 点、
+    闰年 17568 点（规格书 §2.2 只规定 15/30 分钟应分别对应 17520/17568 与 35040/35136）。
+    """
     leap = 1 if is_leap_year(year) else 0
     if resolution is Resolution.HOURLY:
         return 8760 + 24 * leap
+    if resolution is Resolution.HALF_HOURLY:
+        return 17520 + 48 * leap
     if resolution is Resolution.QUARTER_HOURLY:
         return 35040 + 96 * leap
     if resolution is Resolution.DAILY:
@@ -48,6 +54,8 @@ def points_per_year(year: int, resolution: Resolution = Resolution.HOURLY) -> in
 def _numpy_step(resolution: Resolution) -> np.timedelta64:
     if resolution is Resolution.HOURLY:
         return np.timedelta64(1, "h")
+    if resolution is Resolution.HALF_HOURLY:
+        return np.timedelta64(30, "m")
     if resolution is Resolution.QUARTER_HOURLY:
         return np.timedelta64(15, "m")
     if resolution is Resolution.DAILY:

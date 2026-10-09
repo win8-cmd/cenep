@@ -197,12 +197,21 @@ class RiskLevel(StrEnum):
 # V2 §3 P0.1 时序分辨率
 # --------------------------------------------------------------------------- #
 class Resolution(StrEnum):
-    """时序数据分辨率（V2 §3 P0.1）。
+    """时序数据分辨率（V2 §3 P0.1、V2.2 §6.1）。
 
     V2 默认 **1 小时粒度**；为 15 分钟数据预留接口（§3 P0.1）。
+
+    **V2.2 阶段 3 增量**：新增成员 ``HALF_HOURLY``（30 分钟）。
+    规格书 §2.2／§6.1 要求"支持 15、30、60 分钟负荷数据"，而 V2 的
+    ``Resolution`` 只有 15 分钟与 1 小时两档，30 分钟数据若强行记为
+    ``QUARTER_HOURLY`` 会把 17520 点伪装成 35040 点的 15 分钟曲线
+    （违反 §0.2"不得把估算/异粒度数据伪装成实测粒度"的同类红线），
+    因此这里**只追加成员**，既有四个成员的取值与语义完全不变，
+    既有项目文件与对外接口不受影响。
     """
 
     HOURLY = "HOURLY"
+    HALF_HOURLY = "HALF_HOURLY"
     QUARTER_HOURLY = "QUARTER_HOURLY"
     DAILY = "DAILY"
     MONTHLY = "MONTHLY"
@@ -211,6 +220,7 @@ class Resolution(StrEnum):
     def label(self) -> str:
         return {
             Resolution.HOURLY: "1 小时",
+            Resolution.HALF_HOURLY: "30 分钟",
             Resolution.QUARTER_HOURLY: "15 分钟",
             Resolution.DAILY: "日",
             Resolution.MONTHLY: "月",
@@ -221,6 +231,7 @@ class Resolution(StrEnum):
         """平年点数。闰年为 ``points_per_year + 1``（日粒度）或 ``+24``（小时粒度）。"""
         return {
             Resolution.HOURLY: 8760,
+            Resolution.HALF_HOURLY: 17520,
             Resolution.QUARTER_HOURLY: 35040,
             Resolution.DAILY: 365,
             Resolution.MONTHLY: 12,
@@ -231,10 +242,41 @@ class Resolution(StrEnum):
         """单个周期的时长（小时），用于 ``Δt`` 换算。"""
         return {
             Resolution.HOURLY: 1.0,
+            Resolution.HALF_HOURLY: 0.5,
             Resolution.QUARTER_HOURLY: 0.25,
             Resolution.DAILY: 24.0,
             Resolution.MONTHLY: 0.0,  # 月粒度不用固定 Δt，按当月小时数处理
         }[self]
+
+    @property
+    def interval_minutes(self) -> int:
+        """单周期分钟数；月粒度无固定间隔，返回 0。"""
+        return {
+            Resolution.HOURLY: 60,
+            Resolution.HALF_HOURLY: 30,
+            Resolution.QUARTER_HOURLY: 15,
+            Resolution.DAILY: 1440,
+            Resolution.MONTHLY: 0,
+        }[self]
+
+    @classmethod
+    def from_interval_minutes(cls, minutes: float) -> Resolution | None:
+        """间隔分钟数 → 分辨率；不支持的间隔返回 ``None``。
+
+        调用方（``cenep.data.load_profile_importer``）必须对 ``None`` 给出**中文错误**，
+        不得在这里静默猜一个近似粒度（V2.2 §6.1、§9.2）。
+        """
+        mapping = {
+            15: cls.QUARTER_HOURLY,
+            30: cls.HALF_HOURLY,
+            60: cls.HOURLY,
+            1440: cls.DAILY,
+        }
+        try:
+            key = int(round(float(minutes)))
+        except (TypeError, ValueError):
+            return None
+        return mapping.get(key)
 
 
 # --------------------------------------------------------------------------- #
@@ -593,4 +635,119 @@ class DuplicateStrategy(StrEnum):
             DuplicateStrategy.SKIP: "跳过已存在的账单",
             DuplicateStrategy.REPLACE: "用新导入的替换旧账单",
             DuplicateStrategy.KEEP_BOTH: "两条都保留",
+        }[self]
+
+
+# --------------------------------------------------------------------------- #
+# V2.2 §2.2、§6.1 高频负荷数据（阶段 3 新增，仅追加，不改既有枚举）
+# --------------------------------------------------------------------------- #
+# 说明：本节的三个枚举是 **V2.2 阶段 3 新增**，追加在文件末尾，
+# 未修改任何既有枚举成员或取值，V2／V2.1 的公开接口与既有项目文件不受影响。
+# --------------------------------------------------------------------------- #
+class LoadDataSourceType(StrEnum):
+    """负荷曲线的数据来源标签（V2.2 §2.2、§6.1、§0.2 红线）。
+
+    **这是"实测高频负荷"与"月账单估算负荷"必须区分的唯一权威标签**（规格书 §0.2）：
+
+    * ``HIGH_FREQUENCY_IMPORT``：用户导入的真实 15/30/60 分钟（或其它规则间隔）实测数据；
+    * ``MONTHLY_BILL_ESTIMATE``：由月电量按运行参数／典型曲线**估算**得到的曲线（阶段 4）；
+    * ``SYNTHETIC_TEMPLATE``：直接选用内置可编辑模板生成的曲线（未与任何账单电量回归）。
+
+    取值采用规格书 §2.2 规定的 ``snake_case`` 字面量作为字段契约，中文名经 :attr:`label` 提供。
+    ``is_measured`` 与 :attr:`parameter_source` 供质量评分、界面配色与报告共同使用，
+    保证估算曲线在**任何**环节都不会被标成实测曲线（阶段 3 先把标签与防线准备好）。
+    """
+
+    HIGH_FREQUENCY_IMPORT = "high_frequency_import"
+    MONTHLY_BILL_ESTIMATE = "monthly_bill_estimate"
+    SYNTHETIC_TEMPLATE = "synthetic_template"
+
+    @property
+    def label(self) -> str:
+        return {
+            LoadDataSourceType.HIGH_FREQUENCY_IMPORT: "实测高频负荷导入",
+            LoadDataSourceType.MONTHLY_BILL_ESTIMATE: "月账单估算负荷",
+            LoadDataSourceType.SYNTHETIC_TEMPLATE: "典型模板合成负荷",
+        }[self]
+
+    @property
+    def is_measured(self) -> bool:
+        """是否**实测**数据（只有高频导入是实测；估算与模板都不是）。"""
+        return self is LoadDataSourceType.HIGH_FREQUENCY_IMPORT
+
+    @property
+    def report_badge(self) -> str:
+        """报告／界面必须显示的来源徽标（规格书 §8.1、§6.3 A：估算必须显著标记）。"""
+        return {
+            LoadDataSourceType.HIGH_FREQUENCY_IMPORT: "实测数据",
+            LoadDataSourceType.MONTHLY_BILL_ESTIMATE: "估算数据（不是实测）",
+            LoadDataSourceType.SYNTHETIC_TEMPLATE: "系统模板合成（不是实测）",
+        }[self]
+
+    @property
+    def parameter_source(self) -> SourceType:
+        """映射到既有来源枚举（规范 §84、§91），供质量评分复用（§8.2 分值表）。
+
+        实测历史负荷按 ``HISTORICAL``（13 分）计；估算按 ``ASSUMPTION``（7 分）计；
+        纯模板按 ``SYSTEM_DEFAULT``（0 分）计 —— 估算**不得**与实测同分。
+        """
+        return {
+            LoadDataSourceType.HIGH_FREQUENCY_IMPORT: SourceType.HISTORICAL,
+            LoadDataSourceType.MONTHLY_BILL_ESTIMATE: SourceType.ASSUMPTION,
+            LoadDataSourceType.SYNTHETIC_TEMPLATE: SourceType.SYSTEM_DEFAULT,
+        }[self]
+
+
+class LoadValueKind(StrEnum):
+    """负荷文件的**数值口径**：间隔平均功率 kW 还是间隔电量 kWh（V2.2 §2.2、§3.2）。
+
+    这是本阶段最容易出错、也最必须显式声明的一项：
+
+    * ``POWER_KW``：``P_i`` 为该间隔**平均功率**（kW），间隔电量 ``E_i = P_i × Δt_h``；
+    * ``INTERVAL_ENERGY_KWH``：``E_i`` 为该间隔**电量**（kWh），可直接累加，**不得再乘 Δt**。
+
+    规格书 §3.2 把两者写成两条不同的公式；把 kWh 当 kW 再乘一次 Δt
+    （或反之）会造成 4 倍／0.25 倍的系统性错误，因此导入时必须由用户或表头明确口径，
+    无法判定时报中文错误而不是猜（§6.1、§9.2）。
+    """
+
+    POWER_KW = "power_kw"
+    INTERVAL_ENERGY_KWH = "interval_energy_kwh"
+
+    @property
+    def label(self) -> str:
+        return {
+            LoadValueKind.POWER_KW: "间隔平均功率（kW）",
+            LoadValueKind.INTERVAL_ENERGY_KWH: "间隔电量（kWh）",
+        }[self]
+
+    @property
+    def unit(self) -> str:
+        return {
+            LoadValueKind.POWER_KW: "kW",
+            LoadValueKind.INTERVAL_ENERGY_KWH: "kWh",
+        }[self]
+
+    @property
+    def is_power(self) -> bool:
+        return self is LoadValueKind.POWER_KW
+
+
+class LoadQualityStatus(StrEnum):
+    """负荷数据集质量状态（V2.2 §2.2、§6.3 A）。
+
+    取值与 :class:`BillQualityStatus` 一致，但分属不同业务对象（账单事实 vs 负荷曲线），
+    不共用同一个枚举，避免"账单有效"与"负荷有效"在类型层面被混用。
+    """
+
+    VALID = "valid"
+    WARNING = "warning"
+    INVALID = "invalid"
+
+    @property
+    def label(self) -> str:
+        return {
+            LoadQualityStatus.VALID: "有效",
+            LoadQualityStatus.WARNING: "有警告",
+            LoadQualityStatus.INVALID: "无效",
         }[self]
