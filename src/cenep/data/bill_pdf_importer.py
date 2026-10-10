@@ -100,6 +100,10 @@ __all__ = [
     "parse_bill_pdf_full",
     "pdf_row_dict",
     "pdf_row_payload",
+    # V2.5 追加：PDF 失败模式预检（实现见 cenep.data.pdf_failure_modes）
+    "ensure_pdf_readable",
+    "pdf_failure_extras",
+    "pdf_probe",
 ]
 
 #: 本模块处理的 PDF 后缀
@@ -1134,6 +1138,12 @@ _DEMAND_LABELS: dict[str, str] = {
     "demand_charge": "需量电费（按实际）",
 }
 
+#: **拆行单元格**识别：整数部分（如 ``30842.``）与小数部分（如 ``066223``）
+#: 被排版拆成相邻两行。仅当两行垂直距离不超过此值时才拼接（避免跨表误拼）。
+_SPLIT_HEAD = re.compile(r"-?\d[\d,]*\.")
+_SPLIT_TAIL = re.compile(r"\d+")
+_SPLIT_MAX_GAP = 20.0
+
 
 def _block_field_value(
     block: list[tuple[float, list[tuple[float, str]]]],
@@ -1145,9 +1155,27 @@ def _block_field_value(
 
     只在该字段自己的列带里配对，避免把相邻列（如"折扣需量电费 0"）的值错配进来；
     带内没有数值、或最近值距离超过两个列宽时返回 ``None``（= 账单未提供，不是 0）。
+
+    V2.5 修复（**拆行单元格**）：真实 9 月账单把「需量值」印成两行——
+    整数部分 ``30842.`` 与小数部分 ``066223``（**同一列**、相邻两行，中间夹着标签行）。
+    早先只把 ``066223`` 当成一个独立数值，于是读出 66,223 kW。
+    现在若某单元格文本以 ``.`` 结尾，就与**同一列**紧随其后的纯数字单元格拼接成
+    ``30842.066223`` 再取数；拼接不成立时退回"整数部分本身"，**不臆造小数**。
     """
     labels: list[tuple[float, float]] = []
     values: list[tuple[float, float, float]] = []
+    #: 列键（x 取整）→ (行 y, x, 以 "." 结尾的待补文本)
+    pending: dict[float, tuple[float, float, str]] = {}
+
+    def flush_pending(key: float, *, with_fraction: str | None = None) -> None:
+        """把待补单元格落成数值（有小数部分则拼接，否则只取整数部分）。"""
+        head_y, head_x, head_text = pending.pop(key)
+        merged = _num(head_text + with_fraction) if with_fraction is not None else None
+        if merged is None:
+            merged = _num(head_text)
+        if merged is not None:
+            values.append((head_y, head_x, merged))
+
     for row_y, cells in block:
         for x, text in cells:
             if not (x_min <= x < x_max):
@@ -1156,9 +1184,28 @@ def _block_field_value(
             if stripped == label or stripped.startswith(label):
                 labels.append((row_y, x))
                 continue
+            key = round(x, 0)
+            # ---- 拆行单元格：整数部分以 "." 结尾 ---- #
+            if _SPLIT_HEAD.fullmatch(stripped):
+                if key in pending:
+                    flush_pending(key)
+                pending[key] = (row_y, x, stripped)
+                continue
+            if key in pending:
+                head_y, _head_x, _head_text = pending[key]
+                if (
+                    _SPLIT_TAIL.fullmatch(stripped)
+                    and abs(row_y - head_y) <= _SPLIT_MAX_GAP
+                ):
+                    flush_pending(key, with_fraction=stripped)
+                    continue
+                flush_pending(key)
             number = _num(stripped)
             if number is not None:
                 values.append((row_y, x, number))
+    for key in list(pending):
+        flush_pending(key)
+
     if not labels or not values:
         return None
     best: tuple[float, float] | None = None
@@ -1208,6 +1255,26 @@ def _parse_demand_and_pf(doc) -> dict[str, Any]:
                 # 不能被当成新块的表头（否则每块会被切碎，字段全部读不到）。
                 current = []
                 blocks.append(current)
+                # V2.5 修复（计费需量误读）：表头行里**除表头文字以外**的单元格都是本子表的数据，
+                # 必须保留，不能整行丢弃。原因有两条实测情形：
+                #   ① 真实 9 月账单：`_pair_rows` 把表头行与「需量值」单元格**整数部分**
+                #      （`30842.`）并成同一逻辑行，整行丢弃后就只剩下一行的小数部分
+                #      `066223` 被当成需量值 → 实测读出 66,223 kW，
+                #      而账单实为 30,844 kW（39 元/kW·月 × 30,844 = 1,202,916.00 元，精确相等）；
+                #   ② 合成/其它版式：`_pair_rows` 会把"纯标签的表头行"与紧随其后的
+                #      **数据行**配对成一个逻辑行，整行丢弃会连数据标签一起丢掉。
+                # 因此这里只剔除两个表头文字本身，其余（数值 + 数据标签）原样进入新块；
+                # 下游 `_block_field_value` 仍按各字段自己的列带取数，不会串列。
+                data_cells = [
+                    (x, text)
+                    for x, text in cells
+                    if not (
+                        text.strip().startswith("输配容")
+                        or text.strip().startswith("功率因数调整电费")
+                    )
+                ]
+                if data_cells:
+                    current.append((y, data_cells))
                 continue
             if current is None:
                 continue
@@ -1258,9 +1325,30 @@ def _parse_demand_and_pf(doc) -> dict[str, Any]:
         return max(values) if values else max_of(key)
 
     result: dict[str, Any] = {}
+    # ---- 计费需量：全户口径 = 各需量块之和（V2.5 修复）---- #
+    # 账单把同一受电点的「主表」与「定比分表」分列为两张并列子表，
+    # 全户计费需量是**两者之和**，不是其中较大的那一张：
+    #   * 9 月：30,842.066223（主表）+ 1.933777（定比）= 30,844.000000，
+    #     与概况页计费数量 30844、电量明细最大需量 30844、
+    #     以及 39 元/kW·月 × 30,844 = 1,202,916.00 元 **三处互证**；
+    #   * 10 月：0（全户汇总块）+ 28,413（主表）= 28,413，与账单一致。
+    # 只有当"求和值 × 需量电价"与"各块需量电费之和"吻合时才采用求和口径，
+    # 否则退回原来的"取与自身乘式自洽的那一块"（对多表独立计费的版式更保守）。
+    demand_values = [block["demand"] for block in blocks if block.get("demand") is not None]
+    charge_values = [
+        block["demand_charge"] for block in blocks if block.get("demand_charge") is not None
+    ]
+    demand_sum = round(sum(demand_values), 6) if demand_values else None
+    charge_sum = round(sum(charge_values), 2) if charge_values else None
+    rate_of_best = best.get("demand_rate")
+    use_sum = False
+    if demand_sum is not None and rate_of_best is not None and charge_sum is not None:
+        if abs(demand_sum * rate_of_best - charge_sum) <= max(1.0, abs(charge_sum) * 0.001):
+            use_sum = True
+
     for key, value in (
         ("demand_rate", best.get("demand_rate")),
-        ("demand", best.get("demand")),
+        ("demand", demand_sum if use_sum else best.get("demand")),
         ("pf_actual", nonzero_max_of("pf_actual")),
         ("pf_standard", min_of("pf_standard")),
         ("pf_factor", nonzero_max_of("pf_factor")),
@@ -1270,7 +1358,7 @@ def _parse_demand_and_pf(doc) -> dict[str, Any]:
     ):
         if value is not None:
             result[key] = value
-    demand = best.get("demand")
+    demand = result.get("demand")
     rate = best.get("demand_rate")
     charge = best.get("demand_charge")
     if charge is not None:
@@ -1990,3 +2078,57 @@ def pdf_row_dict(path: str | Path) -> dict[str, Any]:
     """
     row, _extras = pdf_row_payload(path)
     return row
+
+
+# --------------------------------------------------------------------------- #
+# V2.5 追加（**追加式扩展**）：PDF 失败模式预检入口
+#
+# 上面所有既有函数**一个字都没有改**；这里只是把
+# :mod:`cenep.data.pdf_failure_modes` 的能力转发出来，供界面与报告层调用。
+# 失败分类、中文文案、错误码全部在 ``pdf_failure_modes`` 中定义与测试。
+# --------------------------------------------------------------------------- #
+def pdf_probe(path: str | Path) -> dict[str, Any]:
+    """预检一份待导入的 PDF 是否可解析，返回**可 JSON 序列化**的中文结果字典。
+
+    与 :func:`parse_bill_pdf` 的区别：本函数**不解析任何账单字段、也不抛异常**，
+    只回答"这个文件能不能读、像不像电费账单、要不要 OCR"。
+    典型用法是导入前先调一次，把失败原因显示给用户。
+
+    返回字典的关键键（详见 :class:`cenep.data.pdf_failure_modes.PdfProbe`）：
+
+    * ``ok``：是否通过预检；
+    * ``code``：失败分类码（如 ``pdf.failure.encrypted``），通过时为 ``pdf.ok``；
+    * ``failure``：``{code, summary, detail, action, blocking}``（中文、可操作）；
+    * ``page_count`` / ``text_chars`` / ``image_count`` / ``ocr_hint`` 等。
+    """
+    from .pdf_failure_modes import probe_bill_pdf as _probe_bill_pdf
+
+    probe = _probe_bill_pdf(path)
+    logger.debug("PDF 预检：%s -> %s", path, probe.code.value)
+    return probe.to_dict()
+
+
+def pdf_failure_extras(path: str | Path) -> dict[str, Any]:
+    """预检并把结果封装成**结构化账单事实**，便于写进账单/报表对象。
+
+    返回值可直接并入 ``bill_importer.build_bill_from_row`` 的 ``bill_extras``：
+    含 ``pdf_probe``（完整预检）、``pdf_failure_code`` / ``pdf_failure_message``
+    （供界面直接显示的中文错误码与文案）、``pdf_ocr_required``（是否需要 OCR）。
+    """
+    from .pdf_failure_modes import failure_to_extras, probe_bill_pdf as _probe_bill_pdf
+
+    return failure_to_extras(_probe_bill_pdf(path))
+
+
+def ensure_pdf_readable(path: str | Path) -> dict[str, Any]:
+    """导入前的**中文预检守门**：可读则返回预检字典，不可读则抛中文 ``ValidationError``。
+
+    * 阻断性失败（损坏 / 加密 / 非 PDF / 空白 / 扫描件 / 不是账单）→ 抛
+      :class:`~cenep.calculation.errors.ValidationError`，
+      ``field`` 为失败分类码（如 ``pdf.failure.scanned_no_text``），供界面定位控件；
+    * 非阻断提示（如页数偏多）只记日志并照常返回。
+    """
+    from .pdf_failure_modes import raise_for_bill_pdf
+
+    probe = raise_for_bill_pdf(path)
+    return probe.to_dict()

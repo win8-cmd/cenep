@@ -479,9 +479,12 @@ def probe_pdf(path: str | Path) -> PdfProbe:
         if probe.page_count <= 0:
             probe.failure = _failure(
                 PdfFailureCode.NO_PAGES,
-                f"账单文件「{target.name}」不含任何页面（空文档）。",
-                "PyMuPDF 报告 page_count=0。",
-                "该 PDF 没有可读页面，请重新导出或索取原始账单。",
+                f"账单文件「{target.name}」不含任何可读页面（空文档，或文件已被截断/损坏）。",
+                "PyMuPDF 报告 page_count=0。文件虽含 %PDF- 文件头并能打开，"
+                "但页数为 0——实测把真实账单截断到 40% 字节即会落在此分支"
+                "（另一种截断表现是 open 直接抛错，归入 pdf.failure.corrupted）。",
+                "请重新下载或重新复制该账单原件；若原件本身如此，"
+                "请联系供电单位重新出账。",
             )
             return probe
 

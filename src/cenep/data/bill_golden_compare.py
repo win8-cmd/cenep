@@ -12,7 +12,8 @@
 数据来源与口径
 --------------
 * **期望值**来自人工核对后的 JSON。仓库里已有的
-  ``tests/data/dongfeng_2025_bill_facts.json``（东风本田三厂 2025 年 12 个月账单）
+  ``tests/data/dongfeng_2025_bill_facts.json``（某大工业用户 2025 年 12 个月账单，
+  户名/户号属于业务敏感信息，仅在该数据文件内保留，**本模块代码不复制这些信息**）
   即本框架的**首个期望值来源**，其中 ``months[].billing_month`` 为账期键。
 * **实际值**来自 :func:`cenep.data.bill_pdf_importer.parse_bill_pdf_full` 的行字典
   （键 = ``bill_importer.BILL_COLUMNS`` 的 ``field``）。
@@ -298,17 +299,21 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
 #: 这些字段的失败会被单独归类，使"真实存在的缺陷"与"意外回归"在报告里分得开。
 #:
 #: 规范要求：**不得**为了让报告好看而把失败塞进这里；每条都要有可复现的证据。
+#: 已修复的缺口必须从这里移除（移出后若又失败，就会作为「意外失败」被测试拦住）。
+#:
+#: 修复记录（**不再登记为缺口**）：
+#:   * ``2025-09:demand_kw`` —— 计费需量曾误读为 66,223 kW（实为 30,844 kW）。
+#:     根因：需量子表「需量值」单元格被排版拆成 `30842.` / `066223` 两行，
+#:     且 `30842.` 与表头行同处一个逻辑行被整行丢弃。已修复于
+#:     ``bill_pdf_importer._parse_demand_and_pf``（保留表头行的非表头单元格）
+#:     与 ``bill_pdf_importer._block_field_value``（拼接拆行单元格），
+#:     回归测试见 ``tests/test_v25_pdf_demand_regression.py``。
 DEFAULT_KNOWN_GAPS: dict[str, str] = {
-    "2025-09:demand_kw": (
-        "2025-09 计费需量解析错误：解析得 66,223 kW，账单实为 30,844 kW"
-        "（39 元/kW·月 × 30,844 = 1,202,916.00 元与账单需量电费精确相等）。"
-        "根因：9 月账单第 3 页「需量值」单元格被排版拆成 `30842.` 与 `066223` 两行，"
-        "解析器取到了小数片段。见 taiqu-storage/golden_candidate_9月.md 缺陷 G1。"
-    ),
     "2025-09:period_energy_kwh.VALLEY": (
         "2025-09 低谷电量差 534 kWh：解析得 1,864,348 kWh，期望 JSON 写 1,864,882 kWh。"
         "账单全文检索 1864882 无命中，该值应为「总电量 − 其余三时段」倒算所得；"
-        "而账单第 2/3 页第 2 计量分组（…7778、…3848）的 534 kWh 因表格行跨页未被解析。"
+        "而账单第 2/3 页第 2 计量分组（…7778、…3848）的 534 kWh 因表格行跨页未被解析"
+        "（该组 TOU 行在账单上全部印为 0，534 只出现在总行，故归属时段无法从文本层唯一确定）。"
         "两边孰对未定，标为待复核。见 taiqu-storage/golden_candidate_9月.md 缺陷 G2。"
     ),
 }
@@ -734,7 +739,12 @@ def render_report_text(report: GoldenComparisonReport, *, show_passing: bool = T
         abs_text = "—" if item.abs_diff is None else f"{item.abs_diff:,.6g}"
         rel_text = "—" if item.rel_diff is None else f"{item.rel_diff:.3e}"
         marker = "✔" if item.passed else "✘"
-        gap = "（已知缺口）" if report.gap_reason(item.field) else ""
+        if item.failing and report.gap_reason(item.field):
+            gap = "（已知缺口）"
+        elif item.status == STATUS_PASS and report.gap_reason(item.field):
+            gap = "（原已知缺口，本次通过）"
+        else:
+            gap = ""
         lines.append(
             f"{item.label:<34}{_format_value(item.expected):>18}"
             f"{_format_value(item.actual):>18}{abs_text:>14}{rel_text:>13}"

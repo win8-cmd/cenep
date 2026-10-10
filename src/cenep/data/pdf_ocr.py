@@ -649,6 +649,46 @@ class PyMuPdfOcrBackend(TesseractCliOcrBackend):
         return ""
 
 
+def _render_page_to_png(page: Any, dpi: int) -> tuple[bytes | None, int | None, int | None, str]:
+    """把 PDF 页面渲染成 PNG 字节流。
+
+    返回 ``(图片字节, 宽, 高, 错误说明)``；成功时错误说明为空串、字节不为 ``None``。
+    """
+    try:
+        pixmap = page.get_pixmap(dpi=dpi)
+        return pixmap.tobytes("png"), int(pixmap.width), int(pixmap.height), ""
+    except Exception as exc:  # noqa: BLE001 - 渲染失败必须降级为结果对象
+        return None, None, None, f"{type(exc).__name__}: {exc}"
+
+
+def _recognize_page(backend: Any, page: Any, *, dpi: int) -> OcrPageResult:
+    """统一入口：优先用后端的 ``recognize_page``；鸭子类型后端则走"渲染 + recognize_image"。
+
+    这样"只实现 :meth:`OcrBackend.recognize_image` 的后端"也能被主流程使用，
+    **不要求**它继承 :class:`OcrBackend`。
+    """
+    number = int(getattr(page, "number", 0)) + 1
+    backend_name = str(getattr(backend, "name", type(backend).__name__))
+    custom = getattr(backend, "recognize_page", None)
+    if callable(custom):
+        return custom(page, dpi=dpi)
+
+    image, width, height, error = _render_page_to_png(page, dpi)
+    if image is None:
+        logger.warning("页面渲染为位图失败（第 %d 页）：%s", number, error)
+        return OcrPageResult(
+            page_number=number,
+            ok=False,
+            code=OcrFailureCode.RENDER_FAILED,
+            message=(
+                f"第 {number} 页无法渲染为图片，OCR 无法进行（技术原因：{error}）。"
+                "请确认该 PDF 未加密、未损坏。"
+            ),
+            backend=backend_name,
+        )
+    return backend.recognize_image(image, page_number=number, width=width, height=height)
+
+
 def _parse_tesseract_tsv(stdout: str) -> tuple[list[OcrWord], str]:
     """解析 Tesseract 的 ``tsv`` 输出为 ``(字词框, 全文)``。
 
@@ -932,7 +972,7 @@ def ocr_pdf(
                     )
                 )
                 continue
-            pages.append(selected.recognize_page(page, dpi=dpi))
+            pages.append(_recognize_page(selected, page, dpi=dpi))
     finally:
         try:
             document.close()

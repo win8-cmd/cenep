@@ -515,3 +515,31 @@ def test_real_bill_passes_probe(month: str) -> None:
     assert probe.is_encrypted is False
     assert probe.needs_password is False
     assert probe.was_repaired is False
+
+
+@pytest.mark.parametrize("month", sorted(REAL_BILLS))
+def test_truncated_real_bill_is_explained_in_chinese(month: str, tmp_path: Path) -> None:
+    """**真实账单截断**（丢 60% 字节）：必须给出中文、可操作的失败状态。
+
+    实测真实账单被截断时有两种表现：``open`` 抛 ``FileDataError``（→ CORRUPTED），
+    或能打开但 ``page_count == 0``（→ NO_PAGES）。两者都必须被解释成中文，
+    且文案要点明"截断/损坏/页面"这类可操作信息。
+    """
+    source = REAL_BILLS[month]
+    if not source.exists():
+        pytest.skip(f"真实账单样本缺失（业务资料不入仓库）：{source}")
+
+    raw = source.read_bytes()
+    truncated = tmp_path / f"截断_{source.name}"
+    truncated.write_bytes(raw[: max(1, int(len(raw) * 0.4))])
+
+    probe = probe_bill_pdf(truncated)
+
+    assert probe.code in (PdfFailureCode.CORRUPTED, PdfFailureCode.NO_PAGES), describe_probe(probe)
+    assert probe.failure.blocking is True
+    assert _has_chinese(probe.failure.summary)
+    assert any(
+        keyword in probe.failure.summary + probe.failure.action
+        for keyword in ("截断", "损坏", "不完整", "页面")
+    ), describe_probe(probe)
+    assert probe.text_chars == 0
