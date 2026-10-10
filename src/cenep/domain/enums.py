@@ -518,15 +518,23 @@ class TariffStructure(StrEnum):
 
 
 class BillSourceType(StrEnum):
-    """账单事实的数据来源（V2.1 §2.1）。
+    """账单事实的数据来源（V2.1 §2.1；``pdf`` 为 V2.5 追加）。
 
     ``estimated`` 只用于"用户明确标注为估算的账单"，**不得**用它给 Excel 导入或
     手动录入的数据打标（V2.1 §0.2：估算与实测必须可区分）。
+
+    ``pdf`` 是 **V2.5 追加**的成员：电网下发的原生账单（``.pdf``）经
+    :mod:`cenep.data.bill_pdf_importer` 解析得到，它同样是**用户提供的账单事实**，
+    但来源必须是"PDF"而不是"Excel"——否则报告里的来源统计会把 PDF 账单误记为
+    Excel 导入，用户无法回溯自己到底导的是什么文件（V2.5 §3）。
+    追加成员不改变 ``manual`` / ``excel`` / ``estimated`` 任何一个既有取值的语义，
+    因此旧项目文件、旧测试与既有报告字段全部照常工作。
     """
 
     MANUAL = "manual"
     EXCEL = "excel"
     ESTIMATED = "estimated"
+    PDF = "pdf"
 
     @property
     def label(self) -> str:
@@ -534,19 +542,21 @@ class BillSourceType(StrEnum):
             BillSourceType.MANUAL: "手动录入",
             BillSourceType.EXCEL: "Excel 导入",
             BillSourceType.ESTIMATED: "估算",
+            BillSourceType.PDF: "PDF 账单导入",
         }[self]
 
     @property
     def parameter_source(self) -> SourceType:
         """映射到既有来源枚举（规范 §84、§91），供质量评分与报告复用。
 
-        ``manual`` / ``excel`` 都是用户提供的账单事实，按"用户输入"计；
+        ``manual`` / ``excel`` / ``pdf`` 都是用户提供的账单事实，按"用户输入"计；
         ``estimated`` 是估算，必须按"假设值"计（不得与事实同分）。
         """
         return {
             BillSourceType.MANUAL: SourceType.USER_INPUT,
             BillSourceType.EXCEL: SourceType.USER_INPUT,
             BillSourceType.ESTIMATED: SourceType.ASSUMPTION,
+            BillSourceType.PDF: SourceType.USER_INPUT,
         }[self]
 
 

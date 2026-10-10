@@ -44,7 +44,12 @@ from PySide6.QtWidgets import (
 
 from ..application.bill_service import SORT_FIELDS
 from ..calculation.errors import ValidationError
-from ..data.bill_importer import BILL_COLUMNS, list_sheets
+from ..data.bill_importer import (
+    BILL_COLUMNS,
+    PDF_SHEET_NAME,
+    is_pdf_bill,
+    list_bill_sheets,
+)
 from ..data.importer import read_table_from_sheet
 from ..domain.bill_models import ElectricityBill, label_of
 from ..domain.enums import (
@@ -1325,13 +1330,15 @@ class BillImportWizard(QWidget):
         self.file_label = QLabel("尚未选择文件。", page1)
         self.file_label.setWordWrap(True)
         p1.addWidget(self.file_label)
-        self.file_button = QPushButton("选择账单文件（.xlsx / .csv）…", page1)
+        self.file_button = QPushButton("选择账单文件（.xlsx / .csv / .pdf）…", page1)
         self.file_button.clicked.connect(self.choose_file)
         p1.addWidget(self.file_button)
         p1.addWidget(
             QLabel(
-                "说明：模板为《CENEP_电费账单导入模板.xlsx》，工作表「月账单」一行一条账单；"
-                "列名可中英文、列顺序可变，第 3 步会显示自动识别的列映射并允许手工改判（§5.3、§5.5）。",
+                "说明：可导入两类账单——① 模板《CENEP_电费账单导入模板.xlsx》的『月账单』表"
+                "（一行一条账单，列名可中英文、列顺序可变）；② 电网下发的 **PDF 账单**"
+                "（自动按版式解析并归一化为模板口径，无工作表步骤）。"
+                "两类都会显示自动识别的列映射并允许手工改判（§5.3、§5.5）。",
                 page1,
             )
         )
@@ -1490,17 +1497,24 @@ class BillImportWizard(QWidget):
     def choose_file(self) -> None:
         """弹出文件选择框（自动化测试请直接调用 :meth:`set_file`）。"""
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择账单文件", "", "账单文件 (*.xlsx *.xlsm *.csv);;所有文件 (*)"
+            self,
+            "选择账单文件",
+            "",
+            "账单文件 (*.xlsx *.xlsm *.csv *.pdf);;Excel/CSV (*.xlsx *.xlsm *.csv);;PDF 账单 (*.pdf);;所有文件 (*)",
         )
         if path:
             self.set_file(path)
 
     def set_file(self, path: str | Path) -> bool:
-        """第 1 → 2 步：选择文件并列出工作表（§5.3）。"""
+        """第 1 → 2 步：选择文件并列出工作表（§5.3）。
+
+        V2.5：``.pdf`` 是电网原生账单，**没有工作表概念**，直接跳到第 3 步（映射列）。
+        Excel / CSV 仍走"第 2 步选工作表"。
+        """
         if self._require_service() is None:
             return False
         try:
-            sheets = list_sheets(path)
+            sheets = list_bill_sheets(path)
         except ValidationError as exc:
             self._set_message(f"无法读取该文件，请检查后重试：{exc}")
             return False
@@ -1513,6 +1527,18 @@ class BillImportWizard(QWidget):
         self.sheet = None
         self.preview = None
         self.mapping_overrides = {}
+
+        if is_pdf_bill(self.path):
+            # PDF：无工作表，直接进入"映射列"，第 2 步自动跳过
+            self.sheet = PDF_SHEET_NAME
+            self.file_label.setText(
+                f"已选择文件：{self.path}\nPDF 账单（无工作表概念，已直接进入列映射）"
+            )
+            self.sheet_combo.clear()
+            self.sheet_combo.addItem(PDF_SHEET_NAME)
+            self._set_message("已识别为 PDF 账单，正在解析并生成列映射…", ok=True)
+            return self.load_mapping()
+
         self.file_label.setText(f"已选择文件：{self.path}\n包含工作表：{'、'.join(sheets)}")
         self.sheet_combo.clear()
         for name in sheets:
@@ -1585,9 +1611,17 @@ class BillImportWizard(QWidget):
         return True
 
     def read_headers(self) -> list[str]:
-        """读取所选工作表的表头（手工列映射用；纯文件读取，不做任何计算）。"""
+        """读取所选工作表的表头（手工列映射用；纯文件读取，不做任何计算）。
+
+        PDF 没有"工作表/表头"概念，其"列"就是解析器输出的模板字段名，
+        因此直接复用 :func:`cenep.data.bill_importer.list_bill_headers`。
+        """
         if self.path is None or not self.sheet:
             return []
+        if is_pdf_bill(self.path):
+            from ..data.bill_importer import list_bill_headers
+
+            return list_bill_headers(self.path)
         try:
             rows = read_table_from_sheet(self.path, self.sheet, with_row_numbers=True)
         except ValidationError:
@@ -1597,12 +1631,29 @@ class BillImportWizard(QWidget):
         return [str(header) for header in rows[0][1].keys()]
 
     def _fill_mapping_table(self, preview=None, headers: list[str] | None = None) -> None:
+        """用"账单字段 → 文件列"填充第 3 步的映射表（**永不出现全空**）。
+
+        V2.5 修复点 4：拿不到 ``preview``（自动识别失败、或用户改了工作表名）时，
+        这里曾退化成"全部（不映射）"。用户看不到"文件里有哪些列"，一路点下去就会
+        生成一条**没有数据的空账单**（实测出现过账期=今天、表号=MAIN 的空账单）。
+
+        现在两种路径都保证映射表有内容：
+
+        * 有 ``preview``：直接用自动识别的映射（含未识别列作为候选）；
+        * 没有 ``preview``：用 :func:`cenep.data.bill_importer.guess_bill_column_mapping`
+          对实际表头做**尽力而为**的猜测预填，用户在此基础上改判即可。
+
+        注意：这里只做"列名 → 字段"的匹配，**不含任何计算**（§0.2）。
+        """
         if headers is None:
             headers = sorted({*preview.column_mapping.values(), *preview.unmapped_headers})
         if preview is not None:
             items = list(preview.column_mapping.items())
         else:
-            items = [(column.field, "") for column in BILL_COLUMNS]
+            from ..data.bill_importer import guess_bill_column_mapping
+
+            guessed = guess_bill_column_mapping(headers)
+            items = [(column.field, guessed.get(column.field, "")) for column in BILL_COLUMNS]
         self.mapping_table.setColumnCount(3)
         self.mapping_table.setHorizontalHeaderLabels(["账单字段", "识别到的列（可改判）", "字段含义"])
         self.mapping_table.setRowCount(len(items))

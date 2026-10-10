@@ -548,8 +548,16 @@ class TestFatalErrors:
             preview_bill_import(path)
 
     def test_unsupported_binary_suffix(self, tmp_path):
+        # V2.5 起 .pdf 是受支持的账单格式；损坏的 PDF 报"无法打开"的中文错误，
+        # 而不是"不支持的文件类型"（后者留给真正的未知后缀，如 .docx）。
         path = tmp_path / "账单.pdf"
-        path.write_bytes(b"%PDF-1.4")
+        path.write_bytes(b"%PDF-1.4")  # 只有魔数、无有效结构
+        with pytest.raises(ValidationError, match="无法打开 PDF 账单"):
+            preview_bill_import(path)
+
+    def test_unsupported_unknown_suffix(self, tmp_path):
+        path = tmp_path / "账单.docx"
+        path.write_bytes(b"PK\x03\x04")
         with pytest.raises(ValidationError, match="不支持的文件类型"):
             preview_bill_import(path)
 

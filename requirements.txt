@@ -8,5 +8,7 @@ XlsxWriter>=3.2
 reportlab>=4.1
 PySide6>=6.7
 pyqtgraph>=0.13
+# V2.5 账单导入新增：解析电网原生 PDF 账单（data/bill_pdf_importer.py）
+pymupdf>=1.24
 pytest>=8.0
 pyinstaller>=6.6

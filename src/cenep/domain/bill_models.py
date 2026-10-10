@@ -46,6 +46,7 @@ __all__ = [
     "BILL_PERIOD_CHARGE_FIELDS",
     "BILL_FIELD_LABELS",
     "ENERGY_PERIOD_FIELDS",
+    "HOURLY_PRICE_HOURS",
     "MONTH_FORMAT",
     "SIGNED_CHARGE_FIELDS",
     "BillAnnualSummary",
@@ -55,6 +56,9 @@ __all__ = [
     "BillTolerance",
     "BillValidationIssue",
     "ElectricityBill",
+    "HourlyEnergyPricePoint",
+    "OperationFeeItem",
+    "OperationFeeDetail",
     "billing_month_of",
     "duplicate_key_of",
     "make_bill_id",
@@ -114,6 +118,9 @@ ENERGY_PERIOD_FIELDS: dict[BillEnergyPeriod, str] = {
     period: period.field_name for period in BillEnergyPeriod
 }
 
+#: 账单「24 小时电量电价」表的完整小时集合（V2.5 §3：1~24 时，闭区间）
+HOURLY_PRICE_HOURS: tuple[int, ...] = tuple(range(1, 25))
+
 #: 字段中文名（含单位）。GUI、Excel 模板、导入报错与报告都从这里取，避免各处硬编码。
 BILL_FIELD_LABELS: dict[str, str] = {
     "bill_id": "账单编号",
@@ -146,6 +153,14 @@ BILL_FIELD_LABELS: dict[str, str] = {
     "vat_yuan": "增值税（元）",
     "adjustment_charge_yuan": "调整 / 补退费（元）",
     "bill_total_yuan": "账单总额（元）",
+    "demand_rate_yuan_per_kw_month": "需量电价（元/kW·月）",
+    "power_factor_actual": "功率因数实际值",
+    "power_factor_standard": "功率因数标准",
+    "power_factor_adjustment_factor": "功率因数调整系数",
+    "power_factor_participating_charge_yuan": "参与功率因数调整的电费金额（元）",
+    "energy_per_kva_kwh": "月每千伏安用电量（kWh/kVA）",
+    "hourly_energy_tariff": "24 小时电量电价表",
+    "operation_fee_detail": "市场化运营费用明细",
     "source_type": "数据来源",
     "source_file_name": "来源文件名",
     "source_row_number": "来源行号",
@@ -207,6 +222,152 @@ def duplicate_key_of(
         f"{billing_period_start:%Y-%m-%d}|{billing_period_end:%Y-%m-%d}|"
         f"{str(meter_id or '').strip()}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# V2.5 §3：账单「24 小时电量电价」与「市场化运营费用明细」
+#
+# 说明（增量开发约束 §0.2）：
+# 下面两个模型是 **V2.5 新增**，只追加、不修改既有模型的任何字段或语义，
+# 且它们保存的都是**账单事实**（电网账单上印出来的逐时电量与逐时价格、
+# 运营费用的收支条目），**不是**任何模拟/复算/结算结果。
+# --------------------------------------------------------------------------- #
+class HourlyEnergyPricePoint(_Model):
+    """账单「24 小时电量电价」表中的**一行事实**（V2.5 §3）。
+
+    电网账单（国网湖北版式）第 4 页的「24 小时电量电价」表逐时给出四个数：
+
+    * ``hour``：小时编号，**1~24**（1 时 = 0~1 时，24 时 = 23~24 时，均为整数，无 0 时）；
+    * ``energy_kwh``：该小时的**有功总电量**（kWh，账单事实）；
+    * ``direct_trade_price_yuan_per_kwh``：**直接交易价格**（元/kWh）。按账单备注，
+      该价格由「市场化交易电能量电费电价 + 绿电环境价值电费电价 + 市场化运营费用折价
+      + 历史偏差电价」组成，即净价口径；
+    * ``line_loss_price_yuan_per_kwh``：**上网环节线损价格**（元/kWh），
+      按账单备注并入分时电价机制中的基础电价。
+
+    本模型**只保存账单事实**，不含任何模拟电价、结算结果或"推算电价"
+    （V2.1 §0.2 红线：账单事实与模拟结果必须分开保存）。
+
+    价格字段保留账单原始小数位（不四舍五入，不因为"看起来精度高"就截断），
+    因此没有 ``ge`` / ``le`` 硬约束：取值是否合理由
+    :func:`cenep.calculation.bill_calculator.validate_bill_fields` 统一给出中文问题清单。
+    """
+
+    hour: int = Field(description="小时编号 1~24（1 时 = 0~1 时，24 时 = 23~24 时）")
+    energy_kwh: float | None = Field(default=None, description="该小时有功总电量 kWh（账单事实）")
+    direct_trade_price_yuan_per_kwh: float | None = Field(
+        default=None, description="该小时直接交易价格 元/kWh（净价口径：含绿电环境价值与运营费用折价）"
+    )
+    line_loss_price_yuan_per_kwh: float | None = Field(
+        default=None, description="该小时上网环节线损价格 元/kWh（按账单备注并入基础电价参与分时电价）"
+    )
+
+    @model_validator(mode="after")
+    def _check_hour_range(self) -> HourlyEnergyPricePoint:
+        """小时编号必须是 1~24 的整数（中文报错，便于用户定位账单表）。"""
+        if not 1 <= self.hour <= 24:
+            raise ValueError(
+                f"24 小时电价表的小时编号「{self.hour}」无效：必须是 1~24 的整数"
+                "（1 时表示 0~1 时，24 时表示 23~24 时），请检查账单中的小时列"
+            )
+        return self
+
+    @property
+    def hour_label(self) -> str:
+        """中文小时标签，如 ``3 时``（界面与报告共用）。"""
+        return f"{self.hour} 时"
+
+    def describe(self) -> str:
+        """一行中文摘要（日志与预览用）。"""
+        energy = "未提供" if self.energy_kwh is None else f"{self.energy_kwh:,.0f} kWh"
+        trade = (
+            "未提供"
+            if self.direct_trade_price_yuan_per_kwh is None
+            else f"{self.direct_trade_price_yuan_per_kwh:.6f} 元/kWh"
+        )
+        loss = (
+            "未提供"
+            if self.line_loss_price_yuan_per_kwh is None
+            else f"{self.line_loss_price_yuan_per_kwh:.6f} 元/kWh"
+        )
+        return f"{self.hour_label}：电量 {energy}，直接交易价格 {trade}，上网环节线损价格 {loss}"
+
+
+class OperationFeeItem(_Model):
+    """市场化运营费用明细中的**一条支出条目**（V2.5 §3，账单事实）。
+
+    ``name`` 保留账单上的原文（如 ``B2绿电环境价值电费``），
+    ``amount_yuan`` **允许为负**：降低电费支出的条目在账单上就是负数
+    （例如 ``C4发电侧超额获利回收电费 -204029.06``），不得取绝对值。
+    """
+
+    name: str = Field(min_length=1, description="账单上的费用名称原文（如 B2绿电环境价值电费）")
+    amount_yuan: float = Field(description="金额 元（可为负：负值表示降低电费支出）")
+
+
+class OperationFeeDetail(_Model):
+    """市场化运营费用明细（V2.5 §3，账单事实）。
+
+    账单第 5 页的「市场化运营费明细」按四类给出运营费用：
+
+    * ``b_increase_items``：一、B 增加电费支出（偏差考核、绿电环境价值、现货超额获利回收…）；
+    * ``c_decrease_items``：二、C 降低电费支出（中长期合同偏差考核、发电侧考核…）；
+    * ``virtual_plant_peak_shaving_yuan``：三、虚拟电厂辅助服务调峰电费；
+    * ``frequency_regulation_yuan``：四、调频辅助服务市场结算费用。
+
+    金额口径：``total_yuan == b_increase_total + c_decrease_total + 三 + 四``
+    （``c_decrease_total`` 本身就是负数，因此**直接相加**，不取绝对值、不变号）。
+    模型只保存账单事实，不做任何"收益"或"回收"计算（§0.2）。
+    """
+
+    total_yuan: float | None = Field(default=None, description="总合计 元（账单上「总合计：」一行的金额）")
+    b_increase_total_yuan: float | None = Field(
+        default=None, description="一、B 增加电费支出总市场运营费用 元"
+    )
+    b_increase_items: list[OperationFeeItem] = Field(
+        default_factory=list, description="B 类条目明细（B1 偏差考核、B2 绿电环境价值…）"
+    )
+    c_decrease_total_yuan: float | None = Field(
+        default=None, description="二、C 降低电费支出总市场运营费用 元（账单上为负数）"
+    )
+    c_decrease_items: list[OperationFeeItem] = Field(
+        default_factory=list, description="C 类条目明细（C1 中长期合同偏差考核、C4 发电侧超额获利回收…）"
+    )
+    virtual_plant_peak_shaving_yuan: float | None = Field(
+        default=None, description="三、虚拟电厂辅助服务调峰电费 元"
+    )
+    frequency_regulation_yuan: float | None = Field(
+        default=None, description="四、调频辅助服务市场结算费用 元"
+    )
+
+    @model_validator(mode="after")
+    def _check_totals(self) -> OperationFeeDetail:
+        """B / C 小计必须与其条目明细之和一致（中文报错，不静默改数）。"""
+        for label, declared, items in (
+            ("一、B 增加电费支出", self.b_increase_total_yuan, self.b_increase_items),
+            ("二、C 降低电费支出", self.c_decrease_total_yuan, self.c_decrease_items),
+        ):
+            if declared is None or not items:
+                continue
+            item_sum = round(sum(item.amount_yuan for item in items), 2)
+            if abs(item_sum - round(declared, 2)) > 0.01:
+                raise ValueError(
+                    f"市场化运营费用「{label}」的小计 {declared:.2f} 元与其 "
+                    f"{len(items)} 条条目之和 {item_sum:.2f} 元不一致，请核对账单"
+                )
+        return self
+
+    def item_count(self) -> int:
+        """条目总数（B 类 + C 类），供界面与报告显示。"""
+        return len(self.b_increase_items) + len(self.c_decrease_items)
+
+    def describe(self) -> str:
+        """一行中文摘要（日志与预览用）。"""
+        total = "未提供" if self.total_yuan is None else f"{self.total_yuan:,.2f} 元"
+        return (
+            f"市场化运营费用：总合计 {total}，"
+            f"B 增加支出 {len(self.b_increase_items)} 条、C 降低支出 {len(self.c_decrease_items)} 条"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -277,6 +438,36 @@ class ElectricityBill(_Model):
     )
     bill_total_yuan: float | None = Field(default=None, description="账单总额 元")
 
+    # ---- V2.5 §3 追加：需量电价 / 功率因数 / 24 小时电量电价 / 运营费用 ----
+    # 全部为**可选且带默认值**的追加字段：旧项目文件（.nep）里没有这些键，
+    # 反序列化时取默认值（None / 空列表），因此旧项目照常打开、既有字段语义不变。
+    demand_rate_yuan_per_kw_month: float | None = Field(
+        default=None,
+        description="账单「需量电价」元/千瓦·月（账单事实；**不叫 price**：本模型不得含单价字段，见 §2.3）",
+    )
+    power_factor_actual: float | None = Field(
+        default=None, description="功率因数实际值（账单第 4 页「功率因数实际值」，无量纲）"
+    )
+    power_factor_standard: float | None = Field(
+        default=None, description="功率因数标准（账单第 4 页「功率因数标准」，无量纲）"
+    )
+    power_factor_adjustment_factor: float | None = Field(
+        default=None, description="功率因数调整系数（账单第 4 页「调整系数」，可为负）"
+    )
+    power_factor_participating_charge_yuan: float | None = Field(
+        default=None, description="参与功率因数调整的电费金额 元（账单第 4 页「参与调整电费金额」）"
+    )
+    energy_per_kva_kwh: float | None = Field(
+        default=None, description="月每千伏安用电量 kWh/kVA（账单第 4 页「月每千伏安用电量」）"
+    )
+    hourly_energy_tariff: list[HourlyEnergyPricePoint] = Field(
+        default_factory=list,
+        description="账单「24 小时电量电价」表逐时事实（1~24 时）；空列表 = 账单未提供该表",
+    )
+    operation_fee_detail: OperationFeeDetail | None = Field(
+        default=None, description="账单「市场化运营费明细」事实；None = 账单未提供该表"
+    )
+
     # ---- 来源与备注 ----
     source_type: BillSourceType = Field(default=BillSourceType.MANUAL, description="数据来源")
     source_file_name: str | None = Field(default=None, description="来源文件名（Excel 导入）")
@@ -314,9 +505,53 @@ class ElectricityBill(_Model):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_hourly_price_table(self) -> ElectricityBill:
+        """24 小时电价表必须是「1~24 时各一条」（V2.5 §3，中文报错）。
+
+        允许**完全为空**（= 账单未提供该表），但一旦提供，就必须是完整的 24 条：
+        缺时次会让"消纳率电价计算"取到空洞，而那属于必须让用户看见的输入问题，
+        不允许静默通过（§0.2：缺失不得静默填充）。
+        """
+        if not self.hourly_energy_tariff:
+            return self
+        hours = [point.hour for point in self.hourly_energy_tariff]
+        duplicates = sorted({hour for hour in hours if hours.count(hour) > 1})
+        if duplicates:
+            raise ValueError(
+                "24 小时电价表存在重复小时："
+                + "、".join(f"{hour} 时" for hour in duplicates)
+                + "，每小时只能有一条记录，请检查账单导入结果"
+            )
+        missing = [hour for hour in HOURLY_PRICE_HOURS if hour not in set(hours)]
+        if missing:
+            raise ValueError(
+                "24 小时电价表不完整：缺少 "
+                + "、".join(f"{hour} 时" for hour in missing)
+                + f"（已提供 {len(hours)} 条，应为 24 条）；"
+                "该表是光伏消纳率电价计算的关键输入，请核对账单后再导入"
+            )
+        return self
+
     # ------------------------------------------------------------------ #
     # 派生描述（不是计算，只是把已有字段读出来）
     # ------------------------------------------------------------------ #
+    @property
+    def hourly_energy_sum_kwh(self) -> float | None:
+        """24 小时电价表的电量合计 kWh；表为空或逐时电量全缺失时返回 ``None``。
+
+        这是**把账单已有的逐时电量相加**（描述性汇总），不是模拟结果；
+        它不代表全站总电量：账单里 24 小时表只覆盖参与市场化交易的电能表，
+        定比（分表）电量不在其中，因此不得拿它与 :attr:`energy_total_kwh` 直接相减判错。
+        """
+        values = [point.energy_kwh for point in self.hourly_energy_tariff if point.energy_kwh is not None]
+        return float(sum(values)) if values else None
+
+    @property
+    def has_hourly_price_table(self) -> bool:
+        """是否读取到完整的 24 小时电量电价表。"""
+        return len(self.hourly_energy_tariff) == len(HOURLY_PRICE_HOURS)
+
     @property
     def is_cross_month(self) -> bool:
         """是否跨月账期（§2.1：跨月账单必须在 UI 中明确标注）。"""
@@ -343,10 +578,15 @@ class ElectricityBill(_Model):
         energy = "未提供" if self.energy_total_kwh is None else f"{self.energy_total_kwh:,.1f} kWh"
         amount = "未提供" if self.bill_total_yuan is None else f"{self.bill_total_yuan:,.2f} 元"
         cross = "（跨月账期）" if self.is_cross_month else ""
+        hourly = (
+            f"，24 小时电价表 {len(self.hourly_energy_tariff)} 条"
+            if self.hourly_energy_tariff
+            else ""
+        )
         return (
             f"{self.billing_month} 账单 {self.bill_id}：账期 "
             f"{self.billing_period_start:%Y-%m-%d} ~ {self.billing_period_end:%Y-%m-%d}{cross}，"
-            f"总电量 {energy}，账单总额 {amount}，来源 {self.source_type.label}"
+            f"总电量 {energy}，账单总额 {amount}，来源 {self.source_type.label}{hourly}"
         )
 
 

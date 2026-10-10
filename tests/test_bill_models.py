@@ -133,9 +133,13 @@ class TestFieldContract:
             assert getattr(bill, name) is None, f"{name} 默认值应为 None"
 
     def test_enum_literal_values_match_spec(self):
-        """§2.1：三个 Literal 的取值必须与规格书一致。"""
+        """§2.1：三个 Literal 的取值必须与规格书一致。
+
+        V2.5 追加了 ``pdf``（电网原生 PDF 账单的来源标签），它是**追加**成员：
+        ``manual`` / ``excel`` / ``estimated`` 三个既有取值的语义一字未改。
+        """
         assert {m.value for m in TariffStructure} == {"single_part", "two_part", "unknown"}
-        assert {m.value for m in BillSourceType} == {"manual", "excel", "estimated"}
+        assert {m.value for m in BillSourceType} == {"manual", "excel", "estimated", "pdf"}
         assert {m.value for m in BillQualityStatus} == {"valid", "warning", "invalid"}
 
     def test_timestamps_are_datetime(self):

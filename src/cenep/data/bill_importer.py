@@ -19,6 +19,13 @@
 * 单元格解析失败一律产出**中文行级错误**，不抛裸异常（§0.2）。
 * 复用 :func:`cenep.data.importer.normalize_header` / :func:`parse_timestamp` /
   :func:`list_sheets` / :func:`read_table_from_sheet`，不另建读取与表头归一化实现。
+
+V2.5 新增：PDF 账单
+-------------------
+电网下发的账单常为 **PDF**（非模板）。本模块新增**后缀分派**：``.pdf`` 走
+:mod:`cenep.data.bill_pdf_importer` 解析成"与 Excel 表同构的行"，之后
+**完全复用**同一条链路（列映射 → 预览 → 校验 → 重复识别 → 入库）。
+Excel / CSV 路径的行为**逐位不变**（不新增任何分支副作用）。
 """
 
 from __future__ import annotations
@@ -55,6 +62,8 @@ __all__ = [
     "DEFAULT_SHEET",
     "EXAMPLE_MARKER",
     "MARKER_COLUMN",
+    "PDF_SHEET_NAME",
+    "PDF_SUFFIXES",
     "REQUIRED_BILL_FIELDS",
     "SHEET_BILLS",
     "SHEET_DICT",
@@ -71,6 +80,10 @@ __all__ = [
     "bill_template_bytes",
     "build_bill_from_row",
     "build_bill_template",
+    "guess_bill_column_mapping",
+    "is_pdf_bill",
+    "list_bill_headers",
+    "list_bill_sheets",
     "parse_bill_source",
     "parse_choice",
     "parse_tariff_structure",
@@ -106,6 +119,84 @@ VOLTAGE_LEVEL_OPTIONS: tuple[str, ...] = (
     "110kV",
     "220kV及以上",
 )
+
+# --------------------------------------------------------------------------- #
+# V2.5：PDF 账单支持
+# --------------------------------------------------------------------------- #
+#: 支持直接导入的 PDF 后缀（国网等电网下发的原生账单）
+PDF_SUFFIXES: tuple[str, ...] = (".pdf",)
+#: PDF 账单的"虚拟工作表名"（PDF 无工作表概念，界面统一按单表处理）
+PDF_SHEET_NAME = "PDF 账单"
+
+
+def is_pdf_bill(path: str | Path) -> bool:
+    """判断文件是否为 PDF 账单（按后缀，不读文件内容）。"""
+    return Path(path).suffix.lower() in PDF_SUFFIXES
+
+
+def list_bill_sheets(path: str | Path) -> list[str]:
+    """列出账单文件可选的"工作表"（V2.5：PDF 返回单一虚拟表）。
+
+    * ``.xlsx`` / ``.xlsm`` / ``.csv`` → 复用 :func:`cenep.data.importer.list_sheets`；
+    * ``.pdf`` → 返回 ``["PDF 账单"]``（PDF 无工作表，界面据此跳过选表步骤）。
+
+    :raises ValidationError: 文件不存在、扩展名不支持（中文提示）
+    """
+    if is_pdf_bill(path):
+        target = Path(path)
+        if not target.exists():
+            raise ValidationError(f"文件不存在：{target}", field="data.import.path")
+        return [PDF_SHEET_NAME]
+    return list_sheets(path)
+
+
+def _read_bill_rows(
+    path: str | Path, sheet: str | None
+) -> tuple[list[tuple[int, dict[str, Any]]], list[str], dict[str, Any]]:
+    """读取账单文件的数据行，返回 ``([(行号, 行字典)], 文件级提示, 结构化账单事实)``。
+
+    **这是 Excel 与 PDF 两条路径的唯一分派点**：分派之后的行字典结构完全一致，
+    因此列映射、预览、勾稽、重复识别、入库全部复用，无需为 PDF 另建实现。
+
+    第三个返回值（V2.5）：PDF 账单里**不是标量**的账单事实
+    （24 小时电量电价表、市场化运营费用明细）。它们无法塞进"一行表格"，
+    因此单独返回，由 :func:`build_bill_from_row` 的 ``bill_extras`` 写入账单；
+    Excel / CSV 路径恒为空字典（行为逐位不变）。
+    """
+    if is_pdf_bill(path):
+        from .bill_pdf_importer import pdf_row_payload
+
+        row, extras = pdf_row_payload(path)
+        notes = list(row.pop("_pdf_notes", []) or [])
+        # PDF 只有一条：物理"行号"记为 1，界面即显示"第 1 行"
+        return [(1, row)], notes, extras
+    return list(read_table_from_sheet(path, sheet, with_row_numbers=True)), [], {}
+
+
+def list_bill_headers(path: str | Path) -> list[str]:
+    """列出账单文件的"列名"（供界面手工列映射用，纯读取、不做计算）。
+
+    * ``.pdf`` → 解析后返回其字段名集合（即模板 ``field`` 名 + 「数据标记」）；
+    * 其他 → 返回所读工作表/CSV 的实际表头。
+
+    :raises ValidationError: 文件不存在、格式不支持
+    """
+    if is_pdf_bill(path):
+        from .bill_pdf_importer import pdf_row_dict
+
+        try:
+            row = pdf_row_dict(path)
+        except ValidationError:
+            raise
+        row.pop("_pdf_notes", None)
+        return list(row.keys())
+    sheets = list_sheets(path)
+    sheet_name = DEFAULT_SHEET if DEFAULT_SHEET in sheets else sheets[0]
+    rows = read_table_from_sheet(path, sheet_name, with_row_numbers=True)
+    rows = list(rows)  # type: ignore[arg-type]
+    if not rows:
+        return []
+    return [str(header) for header in rows[0][1].keys()]
 
 
 @dataclass(frozen=True)
@@ -226,6 +317,11 @@ BILL_SOURCE_TEXT: dict[str, BillSourceType] = {
     "导入": BillSourceType.EXCEL,
     "估算": BillSourceType.ESTIMATED,
     "estimated": BillSourceType.ESTIMATED,
+    # V2.5：PDF 账单（电网原生版式）有独立的来源标签，不再记成 excel
+    "pdf": BillSourceType.PDF,
+    "pdf账单": BillSourceType.PDF,
+    "pdf账单导入": BillSourceType.PDF,
+    "pdf导入": BillSourceType.PDF,
 }
 
 
@@ -341,6 +437,27 @@ def _explicit_mapping_passthrough(explicit: dict[str, str] | None) -> dict[str, 
         return None
     cleaned = {k: v for k, v in explicit.items() if str(v or "").strip()}
     return cleaned or None
+
+
+def guess_bill_column_mapping(headers: Iterable[Any]) -> dict[str, str]:
+    """对给定表头做**尽力而为**的列映射猜测（V2.5：导入向导第 3 步的兜底）。
+
+    与 :func:`resolve_bill_columns` 的差别只有一点：**不要求必需列齐全、不抛异常**。
+    用途是导入向导第 3 步（映射列）：当自动识别失败（例如账单列被改名、缺账期列）时，
+    界面仍要把"文件表头 → 账单字段"的**最佳猜测**填进下拉框，让用户在此基础上改判；
+    否则界面会退化成"全部不映射"，用户一路点下去就会生成一条**没有任何数据的空账单**
+    （V2.5 修复点 4）。本函数只做列名匹配，不做任何计算，也不读文件。
+
+    :return: ``{账单字段: 文件表头}``；没有任何可匹配表头时返回空字典。
+    """
+    header_list = [str(h) for h in headers if h is not None and str(h).strip()]
+    if not header_list:
+        return {}
+    try:
+        mapping = resolve_bill_columns(header_list, required=())
+    except ValidationError:  # pragma: no cover - required=() 时不应发生
+        return {}
+    return dict(mapping.mapping)
 
 
 # --------------------------------------------------------------------------- #
@@ -494,6 +611,14 @@ class BillImportRow(_Model):
     duplicate_of: str | None = Field(default=None, description="重复对象说明（已存在账单 ID 或文件内行号）")
     messages: list[str] = Field(default_factory=list, description="中文问题与提示")
     raw: dict[str, str] = Field(default_factory=dict, description="原始单元格文本（供界面显示）")
+    bill_extras: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "V2.5：非标量的**结构化账单事实**（24 小时电量电价表、市场化运营费用明细），"
+            "由 PDF 解析器给出；Excel 路径恒为空字典。它们已在建账单时写入 bill 字段，"
+            "此处保留副本供预览/测试核对"
+        ),
+    )
 
     @property
     def importable(self) -> bool:
@@ -577,9 +702,14 @@ def build_bill_from_row(
     file_name: str,
     default_source: BillSourceType = BillSourceType.EXCEL,
     tolerance: BillTolerance | None = None,
+    bill_extras: dict[str, Any] | None = None,
 ) -> tuple[ElectricityBill | None, list[str], list[str]]:
     """把一行表格解析成账单（V2.1 §2.1、§5.5）。
 
+    :param bill_extras: **V2.5** 非标量的结构化账单事实（如 PDF 账单的
+        ``hourly_energy_tariff`` / ``operation_fee_detail``）。它们不是"一行一列"，
+        所以不走列映射，而是直接写进账单对象的对应字段；Excel 路径传 ``None``，
+        行为与 V2.1 完全一致。未知键会被中文提示告知并忽略（不静默吞掉）。
     :return: ``(账单或 None, 错误列表, 提示列表)``。
 
         * 错误列表非空 → 该行**无效**，``bill`` 为 ``None``；
@@ -687,12 +817,69 @@ def build_bill_from_row(
             errors.append(f"{_loc(sheet_name, row_number, field_name)}：{message}")
         return None, errors, notices
 
+    bill, extra_errors, extra_notices = _attach_bill_extras(
+        bill,
+        bill_extras,
+        sheet_name=sheet_name,
+        row_number=row_number,
+    )
+    errors.extend(extra_errors)
+    notices.extend(extra_notices)
+    if bill is None:
+        return None, errors, notices
+
     bill = apply_quality(bill, tolerance=tolerance)
     # 字段级硬问题（如负值）：作为行错误返回 → 该行"无效"，不参与导入
     for code_message in bill.quality_messages:
         if code_message.startswith("[B01]") or code_message.startswith("[B02]"):
             errors.append(f"{_loc(sheet_name, row_number)}：{code_message}")
     return bill, errors, notices
+
+
+def _attach_bill_extras(
+    bill: ElectricityBill,
+    bill_extras: dict[str, Any] | None,
+    *,
+    sheet_name: str,
+    row_number: int,
+) -> tuple[ElectricityBill | None, list[str], list[str]]:
+    """把**非标量**的结构化账单事实写进账单对象（V2.5）。
+
+    这些字段（``hourly_energy_tariff`` / ``operation_fee_detail``）不是"一行一列"，
+    无法走列映射，因此由 PDF 解析器直接给出。未知键一律**中文提示并忽略**，
+    不静默丢弃；写入失败（例如 24 小时表不完整）按行错误处理，该行不入库。
+
+    :return: ``(账单或 None, 错误列表, 提示列表)``
+    """
+    if not bill_extras:
+        return bill, [], []
+    notices: list[str] = []
+    updates: dict[str, Any] = {}
+    for key, value in bill_extras.items():
+        if key not in ElectricityBill.model_fields:
+            notices.append(
+                f"{_loc(sheet_name, row_number)}：账单解析器给出了无法识别的结构化字段"
+                f"「{key}」，已忽略（不会写入账单）"
+            )
+            continue
+        updates[key] = value
+    if not updates:
+        return bill, [], notices
+    try:
+        # model_copy(update=…) 不触发 model_validator，因此这里显式重建一次
+        # 以复用 24 小时电价表的完整性校验（缺时次必须报中文错误，不得静默通过）
+        merged = {name: getattr(bill, name) for name in ElectricityBill.model_fields}
+        merged.update(updates)
+        updated = ElectricityBill(**merged)
+    except PydanticValidationError as exc:
+        errors: list[str] = []
+        for err in exc.errors():
+            location = err.get("loc", ("",))
+            field_name = str(location[0]) if location else ""
+            message = str(err.get("msg", "")).removeprefix("Value error, ")
+            errors.append(f"{_loc(sheet_name, row_number, field_name)}：{message}")
+        return None, errors, notices
+    return updated, [], notices
 
 
 # --------------------------------------------------------------------------- #
@@ -729,33 +916,66 @@ def preview_bill_import(
     """
     target = Path(path)
     existing_list = list(existing_bills)  # 允许传入生成器：只迭代一次
-    sheets = list_sheets(target)
-    if sheet is None:
-        sheet_name = DEFAULT_SHEET if DEFAULT_SHEET in sheets else sheets[0]
-    elif sheet in sheets:
-        sheet_name = sheet
-    else:
-        raise ValidationError(
-            f"工作表「{sheet}」不存在；文件「{target.name}」包含的工作表：{'、'.join(sheets)}",
-            field="bill.import.sheet",
-        )
 
-    numbered_rows = read_table_from_sheet(target, sheet_name, with_row_numbers=True)
-    numbered_rows = list(numbered_rows)  # type: ignore[arg-type]
+    # V2.5：PDF 无工作表概念，统一用虚拟表名；Excel/CSV 走原有逻辑
+    pdf_source = is_pdf_bill(target)
+    if pdf_source:
+        sheets = list_bill_sheets(target)
+        sheet_name = PDF_SHEET_NAME
+        if sheet not in (None, PDF_SHEET_NAME) and sheet not in sheets:
+            # 用户对 PDF 指定了 Excel 工作表名：忽略并提示（不报致命错误）
+            pass
+    else:
+        sheets = list_sheets(target)
+        if sheet is None:
+            sheet_name = DEFAULT_SHEET if DEFAULT_SHEET in sheets else sheets[0]
+        elif sheet in sheets:
+            sheet_name = sheet
+        else:
+            raise ValidationError(
+                f"工作表「{sheet}」不存在；文件「{target.name}」包含的工作表：{'、'.join(sheets)}",
+                field="bill.import.sheet",
+            )
+
+    numbered_rows, source_notes, bill_extras = _read_bill_rows(
+        target, None if pdf_source else sheet_name
+    )
+    # V2.5：PDF 账单的来源就是「PDF 账单导入」，不再谎报 excel
+    default_source = BillSourceType.PDF if pdf_source else BillSourceType.EXCEL
+    numbered_rows = list(numbered_rows)
+    if not numbered_rows:
+        raise ValidationError(
+            f"文件「{target.name}」没有可识别的账单行", field="bill.import.empty"
+        )
     headers = list(numbered_rows[0][1].keys())
     mapping = resolve_bill_columns(headers, explicit=column_mapping)
     marker_header = next(
         (h for h in headers if normalize_header(h) == normalize_header(MARKER_COLUMN)), None
     )
 
-    messages: list[str] = list(mapping.messages)
-    if marker_header is None and skip_example_rows:
+    messages: list[str] = list(source_notes) + list(mapping.messages)
+    if pdf_source:
+        messages.insert(
+            0,
+            "已按 PDF 账单解析（电网原生版式）：解析结果已归一化为模板口径，"
+            "请在第 3 步核对列映射、第 4 步逐行核对数值。",
+        )
+        if sheet not in (None, PDF_SHEET_NAME):
+            messages.append(
+                f"PDF 账单没有工作表概念，已忽略指定的工作表「{sheet}」"
+            )
+        marker_header = None  # PDF 无"示例行标记"列，跳过示例行识别
+    elif marker_header is None and skip_example_rows:
         messages.append(
             f"未找到『{MARKER_COLUMN}』列，无法识别示例行，已按全部数据行处理"
             "（模板自带示例行请务必删除或清空后再导入）"
         )
     ignored_headers = [
-        h for h in mapping.unmapped_headers if marker_header is None or h != marker_header
+        h
+        for h in mapping.unmapped_headers
+        if (marker_header is None or h != marker_header)
+        # PDF 是解析产物，不存在"数据标记"列：不把它算作"未识别的列"噪音
+        and not (pdf_source and normalize_header(h) == normalize_header(MARKER_COLUMN))
     ]
     if ignored_headers:
         messages.append("未识别的列（已忽略）：" + "、".join(ignored_headers[:10]))
@@ -765,7 +985,7 @@ def preview_bill_import(
         sheet_name=sheet_name,
         available_sheets=sheets,
         column_mapping=dict(mapping.mapping),
-        unmapped_headers=list(mapping.unmapped_headers),
+        unmapped_headers=ignored_headers,
         existing_bill_ids=sorted({bill.bill_id for bill in existing_list}),
         messages=messages,
     )
@@ -790,7 +1010,9 @@ def preview_bill_import(
             row_number=row_number,
             project_id=project_id,
             file_name=target.name,
+            default_source=default_source,
             tolerance=tolerance,
+            bill_extras=bill_extras,
         )
 
         row_messages: list[str] = [*row_errors, *notices]
@@ -834,13 +1056,14 @@ def preview_bill_import(
                 duplicate_of=duplicate_of,
                 messages=row_messages,
                 raw=raw_text,
+                bill_extras=dict(bill_extras),
             )
         )
 
     preview.example_rows_skipped = example_skipped
 
-    # 「分时电价」工作表：V2.1 不消费，有数据时明确提示（不静默忽略）
-    if SHEET_TARIFF in sheets:
+    # 「分时电价」工作表：V2.1 不消费，有数据时明确提示（不静默忽略）。PDF 无此表，跳过。
+    if not pdf_source and SHEET_TARIFF in sheets:
         try:
             tariff_rows = read_table_from_sheet(target, SHEET_TARIFF)
         except ValidationError:
@@ -1045,6 +1268,8 @@ def _write_template(workbook_path: Path | None) -> Any:
         "voltage_level": list(VOLTAGE_LEVEL_OPTIONS),
         "source_type": ["手动录入", "Excel导入", "估算"],
     }
+    # V2.5 说明：模板下拉**不加**「PDF 账单导入」——PDF 来源由解析器自动打标，
+    # 用户手工在 Excel 模板里选 PDF 只会造成来源与事实不符。
     headers_in_order = [column.header for column in BILL_COLUMNS]
     last_row = 1 + len(examples) + 200
     for field_name, options in enum_options.items():
