@@ -125,18 +125,25 @@ class TestCaliberLegend:
 class TestPackagingMetadata:
     """打包元数据回归（§8.4 第 5 条：版本号口径必须清楚且可核验）。"""
 
-    def test_version_info_declares_release_2_4(self):
+    def test_version_info_declares_release_2_5(self):
+        """V2.5 交付号：``build/version_info.txt`` 必须写 2.5.0（EXE 文件属性页口径）。"""
         text = (ROOT / "build" / "version_info.txt").read_text(encoding="utf-8")
-        assert "filevers=(2, 4, 0, 0)" in text
-        assert 'StringStruct("ProductVersion", "2.4.0")' in text
+        assert "filevers=(2, 5, 0, 0)" in text
+        assert 'StringStruct("ProductVersion", "2.5.0")' in text
 
-    def test_program_and_schema_versions_unchanged(self):
-        """§0.2 冻结：交付版本递增**不得**改动程序版本与项目文件 schema 版本。"""
+    def test_frozen_interface_versions_unchanged(self):
+        """§0.2 冻结：交付版本递增**不得**改动项目文件 schema 版本与计算引擎版本。
+
+        V2.5 起 ``cenep.__version__`` 与交付号统一（2.5.0，由需求方指定）；
+        ``schema_version`` 与 ``CALCULATION_ENGINE_VERSION`` 仍然冻结，**确认未动**。
+        """
         from cenep import __version__
+        from cenep.infrastructure.migration import CALCULATION_ENGINE_VERSION
         from cenep.infrastructure.project_file import SCHEMA_VERSION
 
-        assert __version__ == "2.0.0"
+        assert __version__ == "2.5.0"
         assert SCHEMA_VERSION == "2.0"
+        assert CALCULATION_ENGINE_VERSION == "2.0.0"
 
     def test_release_notes_exist_and_state_version_split(self):
         notes = ROOT / "V2.4_RELEASE_NOTES.md"

@@ -1,0 +1,56 @@
+{
+  "_说明": "黄金样本期望值 JSON 模板。照此结构填写；字段语义与容差规则见同目录上级 README.md 第 6 节。真实账单 PDF 不入仓库。",
+  "_必填": ["billing_month", "file_name", "billing_period_start", "billing_period_end", "energy_total_kwh", "bill_total_yuan"],
+  "_缺失与零": "账单没写 → 写 null（不要写 0）；账单明写 0 → 写 0；账单写 '-' → 写 null 并在 verification 里说明。",
+  "_等价值": "voltage_level 允许写 '110千伏'，比对时由 normalize_voltage_kv 归一成 110.0 后按绝对容差 0.5 比较。",
+  "_禁止": "不得为让比对通过而放宽容差或删除失败样本；不得把未人工核对的数值标为已确认。",
+
+  "source": "（文字说明）这些数值来自哪些账单、什么口径、由谁核对",
+  "source_files": "（路径模式）例如 C:\\...\\25年电费\\*.pdf（只读）",
+  "extracted_by": "（提取方式）脚本名 / 人工录入",
+  "verification": "（已做过的勾稽与核对说明，含核对人与日期；未核对请写'待人工核对'）",
+
+  "totals": {
+    "energy_kwh": null,
+    "amount_yuan": null,
+    "weighted_price_yuan_per_kwh": null
+  },
+
+  "months": [
+    {
+      "billing_month": "YYYY-MM",
+      "file_name": "（账单文件名，须与 manifest.json 一致）",
+      "billing_period_start": "YYYY-MM-DD",
+      "billing_period_end": "YYYY-MM-DD",
+      "customer_no": "（户号）",
+      "voltage_level": "（如 110千伏）",
+      "energy_total_kwh": null,
+      "energy_charge_yuan": null,
+      "demand_kw": null,
+      "demand_charge_yuan": null,
+      "power_factor_yuan": null,
+      "bill_total_yuan": null,
+      "avg_price_declared": null,
+      "component_unit_price_yuan_per_kwh": {
+        "market_energy": null,
+        "line_loss": null,
+        "transmission_distribution": null,
+        "system_operation": null,
+        "government_fund": null
+      },
+      "period_energy_kwh": {
+        "SHARP_PEAK": null,
+        "PEAK": null,
+        "FLAT": null,
+        "VALLEY": null
+      },
+      "period_unit_price_yuan_per_kwh": {
+        "_说明": "解析行字典目前没有分时电价字段，写了也不会被比对（报告中视为未验证）",
+        "SHARP_PEAK": null,
+        "PEAK": null,
+        "FLAT": null,
+        "VALLEY": null
+      }
+    }
+  ]
+}

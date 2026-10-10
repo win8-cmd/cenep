@@ -1,4 +1,4 @@
-﻿"""账单应用服务：手动录入 / 编辑 / 复制 / 删除 / 导入 / 汇总 / 保存（V2.1 §5.1、§5.4、§5.5）。
+"""账单应用服务：手动录入 / 编辑 / 复制 / 删除 / 导入 / 汇总 / 保存（V2.1 §5.1、§5.4、§5.5）。
 
 分层职责（V2.1 §1、§0.2）
 ------------------------
@@ -33,6 +33,11 @@ from ..calculation.bill_calculator import (
     apply_quality,
     monthly_summary,
     reconcile_bill,
+)
+from ..calculation.bill_price_source import (
+    CUSTOMER_KIND_MARKET_DIRECT,
+    BillEnergyPriceResolution,
+    resolve_bill_energy_price,
 )
 from ..calculation.errors import ValidationError
 from ..data.bill_importer import (
@@ -206,6 +211,37 @@ class BillService:
     def score_bill(self, bill_id: str) -> BillQualityScore:
         """账单数据质量评分（§5.5）。"""
         return score_bill_quality(self.get_bill(bill_id), tolerance=self.tolerance)
+
+    def resolve_energy_price(
+        self,
+        bill_id: str,
+        *,
+        customer_kind: str = CUSTOMER_KIND_MARKET_DIRECT,
+        include_line_loss: bool = False,
+        gov_tou_prices: dict[object, float] | None = None,
+        gov_tou_energy_by_period: dict[object, float] | None = None,
+    ) -> BillEnergyPriceResolution:
+        """按**写死的优先级**给出某张账单的替代电价口径（V2.5 §5）。
+
+        本方法**只做转调**，不含任何公式（§0.2：核心规则在 ``calculation/``，应用层与界面
+        不得再实现一套"取平均电价"的逻辑）。优先级与中文说明见
+        :func:`cenep.calculation.bill_price_source.resolve_bill_energy_price`：
+        ① 账单 24 小时电量电价表（逐时交易价格，**首选**）→ ② 账单平均综合电价（降级并披露）
+        → ③ 政府峰谷分时系数（**仅代理购电客户**，市场化直购客户调用即报中文错）。
+
+        ``include_line_loss`` 默认为 ``False``（需求方确认的"逐时交易价格"口径）；
+        传 ``True`` 得到"直接交易价格 + 上网环节线损价格"的全额成本口径。
+
+        :raises ValidationError: 账单不存在 / 无任何可用电价来源 / 客户类型非法
+        """
+        bill = self.get_bill(bill_id)
+        return resolve_bill_energy_price(
+            bill,
+            customer_kind=customer_kind,
+            include_line_loss=include_line_loss,
+            gov_tou_prices=gov_tou_prices,
+            gov_tou_energy_by_period=gov_tou_energy_by_period,
+        )
 
     def refresh_quality(self) -> int:
         """重算并写回全部账单的质量状态与说明，返回状态发生变化的条数。

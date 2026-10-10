@@ -26,6 +26,15 @@
 
 本模块**不写回账单事实**：任何差异数值都不落进 :class:`~cenep.domain.bill_models.ElectricityBill`
 的金额/电量字段，只影响 ``quality_status`` / ``quality_messages``（V2.1 §0.2、§5.5）。
+
+V2.5 §5 账单数据分类口径（需求方已确认）在本模块的落点
+----------------------------------------------------
+* ``operation_fee_detail``（市场化运营费用，第 5 页 B/C 类）**只留档，绝不参与任何费用或电价
+  计算**：它是市场化交易结算项，**已包含在账单总电费里**，重复计入即重复计算。本模块只在
+  ``messages`` / ``assumptions`` 中如实披露它的存在与总合计，从不把它加进任何合计。
+* ``hourly_energy_tariff``（24 小时电量电价表）是消纳率电价的**首选来源**；取价优先级与
+  中文说明见 :mod:`cenep.calculation.bill_price_source`。
+* ``meter_groups``（逐电能表计量分组）只用于校验与来源追溯，不单独参与电价计算。
 """
 
 from __future__ import annotations
@@ -468,6 +477,36 @@ def reconcile_bill(
         "账单平均综合电价 P_avg = 账单总额 / 总购电量仅为**账单统计口径**，"
         "不可直接作为光伏自用电量的边际节省电价（V2.1 §3.1）"
     )
+
+    # ---------------- V2.5 §5：账单数据分类口径的三条硬披露 ----------------
+    # 这三条必须同时出现在**界面可见的中文说明**（经 quality_messages）与
+    # **报告 assumptions** 中（规格书 §3.1 要求口径随结果披露，不得只在代码注释里写）。
+    if bill.operation_fee_detail is not None:
+        operation = bill.operation_fee_detail
+        messages.append(
+            "市场化运营费用（账单第 5 页 B 增加支出 / C 降低支出 / 虚拟电厂调峰 / 调频）"
+            f"总合计 {('未提供' if operation.total_yuan is None else f'{operation.total_yuan:,.2f} 元')}："
+            "**只作明细留档，不进入任何电价或电费计算口径**"
+        )
+        assumptions.append(
+            "市场化运营费用（operation_fee_detail，第 5 页 B/C 类）**只留档，绝不进入电价或费用的"
+            "计算口径**：这些是市场化交易结算项，**已包含在账单总电费里**，若同时计入本软件的"
+            "电费/电价测算即构成**重复计算**。因此本软件的任何公式都不得消费该字段（V2.5 §5、§0.2）"
+        )
+    if bill.hourly_energy_tariff:
+        assumptions.append(
+            "消纳率电价的**首选来源**是账单「24 小时电量电价」表（逐时直接交易价格 + "
+            "上网环节线损价格），按逐时电量加权取值；该户为**市场化直购客户**，其逐时交易价格"
+            "才是真实的替代电价，**不得**套用湖北政府峰谷系数（尖峰 200% / 高峰 150% / 低谷 45%），"
+            "该系数只适用于『代理购电』客户（V2.5 §5）"
+        )
+    if bill.meter_groups:
+        assumptions.append(
+            f"账单电量明细含 {len(bill.meter_groups)} 个计量分组（含定比分表），"
+            "已随账单保存并用于核对『分时电量合计 = 各表计费电量之和』与来源追溯；"
+            "分组明细**不单独参与电价计算**，示数/倍率/抄见电量/变损/线损/加减等中间过程量不入模型"
+            "（V2.5 §5）"
+        )
 
     return BillReconciliation(
         bill_id=bill.bill_id,

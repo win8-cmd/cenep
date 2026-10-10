@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cenep"
-version = "2.0.0"
-description = "工商业新能源项目经济评价软件 V2（含 8760 时序仿真与储能调度；前期快速测算）"
+version = "2.5.0"
+description = "工商业新能源项目经济评价软件 V2.5（账单 PDF 全量解析 + 账单数据分类口径；含 8760 时序仿真与储能调度）"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",

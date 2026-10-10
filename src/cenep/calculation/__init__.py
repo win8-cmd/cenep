@@ -18,6 +18,9 @@
 ``sensitivity``          敏感性分析
 ``validator``            输入校验与守恒校验
 ``engine``               统一入口 ``calculation_engine.calculate(project)``
+``bill_calculator``      账单勾稽（ΔE / ΔC / 平均综合电价）与口径披露
+``bill_recalculator``    基准账单复算与差异分析
+``bill_price_source``    **账单电价取值来源与优先级**（逐时电价优先；政府峰谷系数仅代理购电）
 ======================  ==========================================
 
 **禁止**在 ``ui`` / ``reports`` 中复制本包任何公式。

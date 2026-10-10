@@ -39,6 +39,26 @@
 * 24 小时电价表只覆盖参与市场化交易的电能表，其电量合计**不必**等于全站总电量；
   差额在提示里如实给出，不判错、不臆造。
 
+数据分类口径（V2.5 §5，**需求方已逐条确认**）
+-------------------------------------------
+① **必须进模型（直接参与计算）**：账期起止、分时电量（尖/峰/平/谷，取本模块第 2~3 页
+   **电量明细**，不信第 1 页"峰谷比例"）、24 小时电量 + 直接交易价格 + 上网环节线损价格
+   （:attr:`~cenep.domain.bill_models.ElectricityBill.hourly_energy_tariff`，
+   **消纳率电价的首选输入**）、电压等级 + 计费方式、计费需量 + 需量电价、总购电量 + 总电费。
+② **进模型但只用于校验与追溯**：六项费用分项、功率因数三件套、户号 / 电能表编号 / 户名、
+   ``meter_groups``（逐电能表分组明细，含定比分表与上级表号）。
+③ **不进模型（已确认丢弃）**：示数、倍率、抄见电量、变损、线损、加减（中间过程量，
+   只保留最终"计费电量"）、**正向无功电量**、第 1 页"峰谷比例"、用电地址 / 供电服务单位 /
+   账单打印日期 / 市场化属性等展示性文字、增值税专用发票金额。这些字段本模块**读出来后不写进
+   任何模型**，只在本模块内部用于定位列位与勾稽。
+④ **特别当心：市场化运营费用（第 5 页 B/C 类，样本总合计 −295,720.67 元）只留档，
+   绝不进入电价或费用的计算口径**：这些是市场化交易结算项，**已包含在总电费里**，
+   若同时计入会**重复计算**。本模块、账单模型、界面提示与报告 assumptions 三处均已写明。
+⑤ **关键口径：逐时电价优先**。该户是**市场化直购客户**，其逐时交易价格才是真实的替代电价
+   （实测 1–9 时 0.416~0.437，10–13 时 0.239~0.295 元/kWh）。**不得**对其套用湖北政府峰谷系数
+   （尖峰 200% / 高峰 150% / 低谷 45%）——那适用于"代理购电"客户。取价优先级与中文说明见
+   :mod:`cenep.calculation.bill_price_source`。
+
 已知版式（国网湖北，同一户逐月导出，非固定模板）
 ------------------------------------------------
 1. **表格版**（2024-01 ~ 2024-08）：分时电量在"尖峰时段(kW·h)"四标签块里，按坐标就近取值。
@@ -129,7 +149,12 @@ _FIELD_MAP: dict[str, str] = {
 #: V2.5 §3 **结构化**账单事实：值不是标量，不能放进"一行表格"的行字典。
 #: 它们由 :func:`pdf_row_payload` 单独返回，再由
 #: :func:`cenep.data.bill_importer.build_bill_from_row` 的 ``bill_extras`` 参数写入账单。
-_EXTRA_KEYS: tuple[str, ...] = ("hourly_energy_tariff", "operation_fee_detail")
+#:
+#: ``meter_groups``（逐电能表计量分组明细，V2.5 §5）**曾经**不在账单模型里，
+#: 于是导入时被报为「无法识别的结构化字段…已忽略」，数据被丢掉；
+#: 现已给 :class:`~cenep.domain.bill_models.ElectricityBill` 追加同名模型字段，
+#: 这里随之登记，界面不再出现该噪声提示。
+_EXTRA_KEYS: tuple[str, ...] = ("hourly_energy_tariff", "operation_fee_detail", "meter_groups")
 
 #: 不作为账单事实字段的解析键（仅内部记录，避免污染模板口径）
 _SKIP_KEYS: frozenset[str] = frozenset({"_vat_invoice", "vat", "_pv_pct", "_pv_pct_source"})
@@ -1721,9 +1746,18 @@ def _check_reconciliations(
     operation: OperationFeeDetail | None = extras.get("operation_fee_detail")
     if operation is not None:
         messages.append(operation.describe())
+        # 界面提示：这一条必须显式写出"只留档、不参与计算、不得重复计入"，
+        # 否则用户会以为运营费用已被计入收益（V2.5 §5）
+        messages.append(
+            "市场化运营费用（第 5 页 B 增加支出 / C 降低支出 / 虚拟电厂调峰 / 调频）"
+            "**只作明细留档，不进入任何电价或电费计算口径**；"
+            "这些市场化交易结算项已经包含在账单总电费里，若再次计入将造成**重复计算**"
+            "（B/C 类中负数表示降低电费支出，请勿取绝对值）"
+        )
         assumptions.append(
             "市场化运营费用（B 增加支出 / C 降低支出 / 虚拟电厂调峰 / 调频）为账单事实，"
-            "已按账单原文与符号保存，不做任何收益或回收计算（§0.2）"
+            "已按账单原文与符号保存，**只留档**：这些结算项已包含在总电费里，"
+            "不参与本软件任何电价或费用计算，重复计入即重复计算（V2.5 §5、§0.2）"
         )
         if (
             operation.total_yuan is not None
@@ -1800,6 +1834,9 @@ def _parse_document(doc) -> _ParseOutcome:
             "meters": group.meters,
             "tariff": group.tariff,
             "is_ratio_submeter": group.is_ratio_submeter,
+            # 定比分表的上级表号：来源追溯必需（"这块分表挂在哪块主表下"）
+            "parent_meters": group.parent_meters,
+            # 只保留**计费电量**（示数 / 倍率 / 抄见 / 变损 / 线损 / 加减一概不进模型，V2.5 §5）
             "energy": dict(group.energy),
         }
         for group in groups
@@ -1812,7 +1849,9 @@ def _parse_document(doc) -> _ParseOutcome:
     operation = _parse_operation_fees(doc)
     if operation is not None:
         extras["operation_fee_detail"] = operation
-    # 逐电能表分组的计费电量（结构化账单事实：供界面/测试核对"多块表是否正确合并"）
+    # 逐电能表分组的计费电量（结构化账单事实：供界面/测试核对"多块表是否正确合并"）。
+    # V2.5 §5：账单已有同名字段 ``meter_groups``，因此会被正常写入账单，
+    # 不再触发「无法识别的结构化字段」提示。
     extras["meter_groups"] = raw["_meter_groups"]
 
     normalized, notes, assumptions = _normalize(raw)
@@ -1903,7 +1942,10 @@ def parse_bill_pdf_full(
     第三个元素（``extras``）目前含：
 
     * ``hourly_energy_tariff``：``list[HourlyEnergyPricePoint]``——24 小时电量电价表；
-    * ``operation_fee_detail``：``OperationFeeDetail``——市场化运营费用明细。
+    * ``operation_fee_detail``：``OperationFeeDetail``——市场化运营费用明细
+      （**只留档，不得进入任何电价或费用计算**：这些结算项已包含在总电费里，重复计入即重复计算）；
+    * ``meter_groups``：``list[dict]``——逐电能表计量分组明细（含定比分表与上级表号），
+      **只用于校验与来源追溯**，不单独参与电价计算。
 
     这些是**账单事实**，不是模拟结果（V2.1 §0.2）；它们不是标量，
     因此不放进"一行表格"的行字典，而由

@@ -46,6 +46,7 @@ __all__ = [
     "BILL_PERIOD_CHARGE_FIELDS",
     "BILL_FIELD_LABELS",
     "ENERGY_PERIOD_FIELDS",
+    "ENERGY_TAG_KEYS",
     "HOURLY_PRICE_HOURS",
     "MONTH_FORMAT",
     "SIGNED_CHARGE_FIELDS",
@@ -57,6 +58,7 @@ __all__ = [
     "BillValidationIssue",
     "ElectricityBill",
     "HourlyEnergyPricePoint",
+    "MeterGroupDetail",
     "OperationFeeItem",
     "OperationFeeDetail",
     "billing_month_of",
@@ -121,6 +123,12 @@ ENERGY_PERIOD_FIELDS: dict[BillEnergyPeriod, str] = {
 #: 账单「24 小时电量电价」表的完整小时集合（V2.5 §3：1~24 时，闭区间）
 HOURLY_PRICE_HOURS: tuple[int, ...] = tuple(range(1, 25))
 
+#: 计量分组「计费电量」允许的示数类型键（V2.5 §5 ③：只保留最终计费电量，
+#: 示数 / 倍率 / 抄见电量 / 变损 / 线损 / 加减 等中间过程量一律不进模型）
+ENERGY_TAG_KEYS: frozenset[str] = frozenset(
+    {"total", "sharp", "peak", "flat", "valley", "offpeak"}
+)
+
 #: 字段中文名（含单位）。GUI、Excel 模板、导入报错与报告都从这里取，避免各处硬编码。
 BILL_FIELD_LABELS: dict[str, str] = {
     "bill_id": "账单编号",
@@ -161,6 +169,7 @@ BILL_FIELD_LABELS: dict[str, str] = {
     "energy_per_kva_kwh": "月每千伏安用电量（kWh/kVA）",
     "hourly_energy_tariff": "24 小时电量电价表",
     "operation_fee_detail": "市场化运营费用明细",
+    "meter_groups": "逐电能表计量分组明细（只校验与追溯）",
     "source_type": "数据来源",
     "source_file_name": "来源文件名",
     "source_row_number": "来源行号",
@@ -370,6 +379,85 @@ class OperationFeeDetail(_Model):
         )
 
 
+class MeterGroupDetail(_Model):
+    """账单电量明细里的**一个计量分组**（V2.5 §5，账单事实）。
+
+    为什么要把"逐电能表的分组明细"存进账单
+    --------------------------------------
+    真实账单第 2~3 页的电量明细是**按电能表分组**给出的：一个受电点下可能有多块主表，
+    外加**定比（分表）**。分时电量必须（主表 + 定比分表）相加才等于账单总电量——
+    2025-10 样本账单实测：主表 7,255,282 kWh + 定比分表 224,136 kWh = 总电量 7,479,418 kWh。
+
+    因此分组明细是"总电量从哪几块表加出来的"的**唯一可追溯依据**：
+    少了它就只能看到一个合计，无法回答"多块表是否正确合并""哪块表贡献了多少尖峰电量"。
+    解析器此前已把该结构放在 ``bill_extras`` 里，但账单模型没有对应字段，
+    于是导入时被报为「无法识别的结构化字段「meter_groups」，已忽略」——**数据被丢掉**。
+    该字段即为修复该缺陷而追加（V2.5 §5）。
+
+    口径边界（V2.5 §5、§0.2）
+    ------------------------
+    * 本模型只保存账单**印出来的计费电量**（``energy``：各示数类型的最终计费电量），
+      **不保存**示数 / 倍率 / 抄见电量 / 变损 / 线损 / 加减等中间过程量；
+    * 分组明细**只用于校验与追溯**（核对"分时电量合计 = 各表计费电量之和"、定位差异来自哪块表），
+      **不单独参与电价计算**：电价计算读的是合并后的账单字段
+      （``energy_sharp_kwh`` 等）与 24 小时电量电价表（:attr:`ElectricityBill.hourly_energy_tariff`）。
+    """
+
+    meters: list[str] = Field(
+        default_factory=list, description="本组电能表编号列表（定比分表的表号形如『定比0.03』）"
+    )
+    tariff: str = Field(default="", description="组头里的电价原文，如『1-10(20)千伏两部制』")
+    is_ratio_submeter: bool = Field(
+        default=False, description="是否定比（分表）：True 时其电量必须与上级主表相加"
+    )
+    parent_meters: list[str] = Field(
+        default_factory=list, description="定比分表的上级电能表编号（来源追溯用；主表为空）"
+    )
+    energy: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "本组**计费电量** kWh，键为示数类型：total / sharp / peak / flat / valley；"
+            "不含示数、倍率、抄见电量、变损、线损、加减等中间过程量"
+        ),
+    )
+
+    @property
+    def total_kwh(self) -> float | None:
+        """本组计费电量合计 kWh；账单未给组合计时返回 ``None``（不是 0）。"""
+        return self.energy.get("total")
+
+    @property
+    def kind_label(self) -> str:
+        """本组的中文类别标签（界面与报告共用）。"""
+        return "定比分表" if self.is_ratio_submeter else "电能表"
+
+    @model_validator(mode="after")
+    def _check_energy_keys(self) -> MeterGroupDetail:
+        """``energy`` 只允许示数类型（计费电量口径），中文报错（V2.5 §5 ③）。
+
+        为什么要在模型层拦截：示数 / 倍率 / 抄见电量 / 变损 / 线损 / 加减 都是中间过程量，
+        已确认**不进模型**。如果放任它们出现在 ``energy`` 里，"哪一个是权威电量"就会产生歧义，
+        而且下游一旦误用就会算错电价——因此这里直接拒绝，而不是静默保留。
+        """
+        unknown = sorted(set(self.energy) - ENERGY_TAG_KEYS)
+        if unknown:
+            raise ValueError(
+                "计量分组的计费电量只接受示数类型"
+                f"（{'、'.join(sorted(ENERGY_TAG_KEYS))}），收到无法识别的键："
+                + "、".join(f"「{key}」" for key in unknown)
+                + "。示数 / 倍率 / 抄见电量 / 变损 / 线损 / 加减 属于中间过程量，"
+                "已确认不进模型，请只保留账单上的最终『计费电量』"
+            )
+        return self
+
+    def describe(self) -> str:
+        """一行中文摘要（日志、界面与报告共用）。"""
+        meters = "、".join(self.meters) if self.meters else "（未识别表号）"
+        total = "未识别" if self.total_kwh is None else f"{self.total_kwh:,.0f} kWh"
+        parent = f"，上级表 {'、'.join(self.parent_meters)}" if self.parent_meters else ""
+        return f"{self.kind_label} {meters}{parent}：电价 {self.tariff or '未识别'}，计费电量合计 {total}"
+
+
 # --------------------------------------------------------------------------- #
 # V2.1 §2.1 ElectricityBill：月电费账单事实
 # --------------------------------------------------------------------------- #
@@ -385,6 +473,27 @@ class ElectricityBill(_Model):
     * ``billing_demand_kw`` 是**账单计费需量**，由计量与计费规则确定，
       **不等于**负荷曲线的最大值；两者不得混用（V2.3 §7.5 才做曲线模拟需量）。
     * 金额字段 ``None`` 表示账单未提供该分项，**不得**自动填 0。
+
+    账单数据分类口径（V2.5 §5，**需求方已逐条确认**）
+    ------------------------------------------------
+    ① **必须进模型（直接参与计算）**：账期起止、分时电量（尖/峰/平/谷，取第 2~3 页电量明细）、
+    ``hourly_energy_tariff``（24 小时电量 + 直接交易价格 + 上网环节线损价格 —— 消纳率电价的
+    **首选输入**）、电压等级 + 计费方式、计费需量 + 需量电价、总购电量 + 总电费（对账锚点）。
+    ② **进模型但只用于校验与追溯**：六项费用分项、功率因数三件套、
+    ``meter_id`` / 客户名 / ``meter_groups``（逐电能表分组明细，含定比分表）。
+    ③ **不进模型（已确认丢弃）**：示数、倍率、抄见电量、变损、线损、加减（中间过程量，
+    只保留最终"计费电量"）、**正向无功电量**（力调电费结果已有）、第 1 页"峰谷比例"
+    （与第 2~3 页明细矛盾，**以明细为准**）、用电地址 / 供电服务单位 / 账单打印日期 /
+    市场化属性等展示性文字、增值税专用发票金额（财务税务口径，本次不建模）。
+    ④ **市场化运营费用（``operation_fee_detail``，第 5 页 B/C 类，样本总合计 −295,720.67 元）
+    只留档，绝不进入电价或费用的计算口径**：这些是市场化交易结算项，**已包含在总电费里**，
+    若同时计入会**重复计算**。本模型只把它作为账单事实保存，任何计算都不得消费它。
+    ⑤ **逐时电价优先**：该户是**市场化直购客户**，其逐时交易价格才是真实的替代电价
+    （样本实测 1–9 时 0.416~0.437，10–13 时 0.239~0.295 元/kWh）。
+    **不得**对其套用湖北政府峰谷系数（尖峰 200% / 高峰 150% / 低谷 45%）——
+    那适用于"代理购电"客户。替代电价的**默认构成就是该逐时直接交易价格**，
+    「上网环节线损价格」需显式开启才叠加；取值优先级与中文说明见
+    :func:`cenep.calculation.bill_price_source.resolve_bill_energy_price`。
     """
 
     bill_id: str = Field(min_length=1, description="账单唯一 ID（同项目内唯一）")
@@ -466,6 +575,13 @@ class ElectricityBill(_Model):
     )
     operation_fee_detail: OperationFeeDetail | None = Field(
         default=None, description="账单「市场化运营费明细」事实；None = 账单未提供该表"
+    )
+    meter_groups: list[MeterGroupDetail] = Field(
+        default_factory=list,
+        description=(
+            "账单电量明细的逐电能表计量分组（含定比分表）；空列表 = 账单未提供分组明细。"
+            "**只用于校验与来源追溯**，不单独参与电价计算"
+        ),
     )
 
     # ---- 来源与备注 ----

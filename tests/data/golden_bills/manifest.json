@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "description": "CENEP 电费账单黄金样本清单。真实账单 PDF 属业务资料、含客户信息，**不入仓库**；此处只登记其来源绝对路径与核对状态。期望值 JSON 复用仓库已有的 tests/data/dongfeng_2025_bill_facts.json（12 个月，不另抄一份）。",
+  "expected_schema": "见同目录 README.md 第 6 节；模板见 expected/TEMPLATE.json",
+  "real_bill_root": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费",
+  "real_bill_root_readonly": true,
+  "samples": [
+    {
+      "id": "dongfeng-3rd-2025-09",
+      "billing_month": "2025-09",
+      "file_name": "本三9月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\本三9月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "程序提取 + 人工核对清单（待需求方签署）",
+      "review_status": "pending_human_review",
+      "notes": "4 页；页数/文本层正常（5,975 字）。核对清单：taiqu-storage/golden_candidate_9月.md。已发现 2 处缺陷：G1 计费需量解析为 66,223 kW（应为 30,844）；G2 第 2 计量分组 534 kWh 因表格行跨页（P2→P3）未进入分时合计，导致低谷电量与期望值差 534 kWh（孰对未定，两边均标待复核）。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-10",
+      "billing_month": "2025-10",
+      "file_name": "东本三厂10月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\东本三厂10月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "程序提取 + 人工核对清单（待需求方签署）",
+      "review_status": "pending_human_review",
+      "notes": "5 页（比 9 月多 1 页，版式不同）。核对清单：taiqu-storage/golden_candidate_10月.md。分时电量四项与期望值**完全一致**（峰=谷=2,063,117 kWh 已用词块坐标逐字核实为账单原文：峰行 y=182.7、谷行 y=196.9，两个独立行在 x=531.8 的计费电量列各印 2001291）。存疑项：G5 账单自身「电量明细·最大需量」为 58,498 kW，而「输配需量电费子表」与费用算术为 28,413 kW（39×28413=1,108,107 精确吻合），建议向出账方确认。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-01",
+      "billing_month": "2025-01",
+      "file_name": "电费明细（1月）.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\电费明细（1月）.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（taiqu-storage/stage5_parse_bills.py 提取，未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对，不得声称已验收。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-02",
+      "billing_month": "2025-02",
+      "file_name": "电费明细（2月）.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\电费明细（2月）.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-03",
+      "billing_month": "2025-03",
+      "file_name": "本田三厂3月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\本田三厂3月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-04",
+      "billing_month": "2025-04",
+      "file_name": "东三4月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\东三4月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-05",
+      "billing_month": "2025-05",
+      "file_name": "东本3厂5月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\东本3厂5月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-06",
+      "billing_month": "2025-06",
+      "file_name": "本三6月账单 (1).pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\本三6月账单 (1).pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-07",
+      "billing_month": "2025-07",
+      "file_name": "本三7月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\本三7月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-08",
+      "billing_month": "2025-08",
+      "file_name": "本三8月账单 (1).pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\本三8月账单 (1).pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-11",
+      "billing_month": "2025-11",
+      "file_name": "11月东本三厂.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\11月东本三厂.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    },
+    {
+      "id": "dongfeng-3rd-2025-12",
+      "billing_month": "2025-12",
+      "file_name": "东本三厂12月账单.pdf",
+      "source_path": "C:\\Users\\Administrator\\Desktop\\参考资料\\东风本田\\开标资料\\式样附件-三工厂\\式样书给出的相关文件\\电费单\\25年电费\\东本三厂12月账单.pdf",
+      "expected_source": "tests/data/dongfeng_2025_bill_facts.json",
+      "expected_verified_by": "既有期望值文件（未逐项人工核对）",
+      "review_status": "unverified",
+      "notes": "本次交付**未**逐项核对。"
+    }
+  ]
+}

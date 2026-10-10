@@ -159,7 +159,7 @@ def _read_bill_rows(
     因此列映射、预览、勾稽、重复识别、入库全部复用，无需为 PDF 另建实现。
 
     第三个返回值（V2.5）：PDF 账单里**不是标量**的账单事实
-    （24 小时电量电价表、市场化运营费用明细）。它们无法塞进"一行表格"，
+    （24 小时电量电价表、市场化运营费用明细、逐电能表计量分组明细）。它们无法塞进"一行表格"，
     因此单独返回，由 :func:`build_bill_from_row` 的 ``bill_extras`` 写入账单；
     Excel / CSV 路径恒为空字典（行为逐位不变）。
     """
@@ -845,9 +845,12 @@ def _attach_bill_extras(
 ) -> tuple[ElectricityBill | None, list[str], list[str]]:
     """把**非标量**的结构化账单事实写进账单对象（V2.5）。
 
-    这些字段（``hourly_energy_tariff`` / ``operation_fee_detail``）不是"一行一列"，
-    无法走列映射，因此由 PDF 解析器直接给出。未知键一律**中文提示并忽略**，
+    这些字段（``hourly_energy_tariff`` / ``operation_fee_detail`` / ``meter_groups``）
+    不是"一行一列"，无法走列映射，因此由 PDF 解析器直接给出。未知键一律**中文提示并忽略**，
     不静默丢弃；写入失败（例如 24 小时表不完整）按行错误处理，该行不入库。
+
+    口径（V2.5 §5、§0.2）：``operation_fee_detail`` **只留档**，任何费用或电价计算都不得消费它
+    （市场化运营费用已包含在总电费里，重复计入即重复计算）；``meter_groups`` 只用于校验与追溯。
 
     :return: ``(账单或 None, 错误列表, 提示列表)``
     """

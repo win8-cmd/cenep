@@ -55,8 +55,9 @@ pip install -r requirements.txt   # 已含 pyinstaller / PyQtGraph / scipy
 pyinstaller build/CENEP.spec --noconfirm
 ```
 
-产物为 `dist/CENEP/CENEP.exe`（**V2 实测 21,958,256 字节 ≈ 20.9 MB**，Win32 版本资源
-`FileVersion = 2.0.0.0`），双击即可运行，**目标机器无需安装 Python**。
+产物为 `dist/CENEP/CENEP.exe`（V2 早期实测 21,958,256 字节 ≈ 20.9 MB；Win32 版本资源由
+`build/version_info.txt` 提供，**V2.5 起为 `FileVersion = 2.5.0.0` / `ProductVersion = 2.5.0`**），
+双击即可运行，**目标机器无需安装 Python**。
 
 > 打包时 `openpyxl`、`reportlab` 的数据文件必须一并收集（`build/CENEP.spec` 已通过
 > `collect_all` 处理），否则打包后的程序会在导出 Excel/PDF 时失败。

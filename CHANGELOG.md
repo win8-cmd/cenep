@@ -19,6 +19,78 @@
 
 ---
 
+## [Unreleased] — V2.5（账单数据分类口径落地 + `meter_groups` 入库 + 版本升级）
+
+> **定位**：把需求方审阅国网湖北 PDF 账单（5 页全量解析）后**逐条确认**的
+> "哪些数据进模型"口径**落地为代码与测试**，并完成交付版本升级。
+> 口径全文见 `DATA_MODEL.md` §10；报告侧披露义务见 `REPORT_SPEC.md` §2.17.1。
+>
+> **状态**：**已交付并可运行**。全部改动为**追加式**：既有公开接口、字段语义、既有公式与
+> 现有报告字段均未改动。
+>
+> **交付版本口径**：本次发布号 **V2.5**（`cenep.__version__ = "2.5.0"`，
+> EXE 资源 `2.5.0.0`，`pyproject.toml` `version = "2.5.0"`）。
+> **冻结接口确认未动**：`schema_version = "2.0"`、`CALCULATION_ENGINE_VERSION = "2.0.0"`、
+> `BILL_SECTION_SCHEMA_VERSION = "1.0"`（§0.2 冻结条款）。
+> 注意与 V2.4 的差别：V2.4 时 `cenep.__version__` 也被当作冻结项（写作 `2.0.0`），
+> V2.5 起按需求方要求与交付号统一为 `2.5.0`。
+
+### Added（V2.5 新增）
+
+* **`domain/bill_models.py`：`MeterGroupDetail` 模型 + `ElectricityBill.meter_groups` 字段**。
+  逐电能表（含**定比分表**与"上级电能表编号"）的分时**计费电量**现在随账单保存，
+  不再在导入时被丢弃。字段**追加式、带默认值（空列表）**，旧 `.nep` 照常打开。
+  只保存最终"计费电量"，示数 / 倍率 / 抄见 / 变损 / 线损 / 加减一律不入模型——
+  由模型层 `ENERGY_TAG_KEYS` 中文校验强制（塞入中间过程量直接报错，不静默保留）。
+* **`calculation/bill_price_source.py`：账单电价取值来源与优先级**（V2.5 §5，新模块）。
+  优先级写死：① 账单 24 小时电量电价表（逐时交易价格 + 上网环节线损价格，**首选**）
+  → ② 账单平均综合电价（降级并披露）→ ③ 政府峰谷分时系数（**仅代理购电客户**）。
+  入口 `resolve_bill_energy_price()` / `hourly_avoided_prices()`；
+  市场化直购客户企图使用政府峰谷系数时抛**中文** `ValidationError`。
+  **默认替代电价 = 逐时「直接交易价格」**（复现需求方实测 1–9 时 0.416~0.437、
+  10–13 时 0.239~0.295 元/kWh）；`include_line_loss=True` 才叠加「上网环节线损价格」
+  得到全额成本口径（必须显式选择并披露）。
+* **`application/bill_service.py`：`BillService.resolve_energy_price()`**（纯转调，不含公式），
+  供界面 / 报告复用同一套优先级，避免各处自建取价逻辑（§0.2）。
+* **`calculation/bill_calculator.reconcile_bill` 新增三条中文口径披露**（进入
+  `BillReconciliation.assumptions`，自动出现在 Excel「账单校验」与 PDF
+  「三、账单事实与校验（四）口径假设」）：运营费用只留档、逐时电价优先、计量分组只追溯。
+* **导入预览新增界面提示**：明确写出市场化运营费用（第 5 页 B/C 类）**只作明细留档、
+  不进入任何电价或电费计算口径**，重复计入即重复计算。
+* **文档**：`DATA_MODEL.md` §10（账单数据分类口径，含 ③ 类"丢弃"逐条理由）；
+  `REPORT_SPEC.md` §2.17.1（报告披露义务）。
+* **测试**：`tests/test_v25_data_caliber.py`——覆盖运营费用不重复计入（数值结果**逐位不变**）、
+  无功电量不入模型、丢弃字段不入模型、逐时电价优先、`meter_groups` 已入库且不再报
+  「无法识别」、版本号与冻结接口。
+
+### Changed（V2.5 变更）
+
+* **交付版本号升级到 2.5.0**：`src/cenep/__init__.py`（`__version__` + 模块 docstring V2.5）、
+  `pyproject.toml`（`version` + `description`）、`build/version_info.txt`
+  （`filevers`/`prodvers`/`FileVersion`/`ProductVersion`）。
+* **`data/bill_pdf_importer.py`**：`meter_groups` 结构化事实补上「上级电能表编号」
+  （定比分表的来源追溯）；`_EXTRA_KEYS` 登记 `meter_groups`；模块 docstring 补
+  「数据分类口径」五条。
+* **`data/bill_importer.py`**：`_attach_bill_extras` / `_read_bill_rows` 的文档补上
+  `meter_groups` 与"运营费用只留档"的口径说明（行为不变）。
+* **测试同步**：`tests/test_v24_report_contract.py` 的版本断言改为 2.5.0，
+  并拆出 `test_frozen_interface_versions_unchanged` 显式锁定
+  `schema_version` / `CALCULATION_ENGINE_VERSION` 未动。
+
+### Fixed（V2.5 修复）
+
+* **导入时不再报「账单解析器给出了无法识别的结构化字段「meter_groups」，已忽略」**：
+  账单模型新增同名字段后，逐电能表分时明细被正常写入账单（采用方案 A），该噪声提示消失。
+
+### 未改动（V2.5 明确保持）
+
+* **`policy/hubei_commercial.py` 的官方与资料两套电价数值**：一个数字都没动。
+* **既有公式**：V2.1 账单校验公式、V2.3 账单复算公式、时序 / 收益 / 财务公式全部逐位不变。
+* **现有报告字段**：Excel 工作表名目与顺序、PDF 章节名目与顺序均未改（新增内容只落在
+  既有的「口径与假设」区块内）。
+
+---
+
 ## [Unreleased] — V2.4（阶段 7：报告、迁移、性能与发布验收）
 
 > **定位**：《CENEP V2.1–V2.4 增量开发执行规格书》§10 阶段 7——

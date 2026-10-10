@@ -628,6 +628,14 @@ V2 在参数页新增 **5 个分组、39 个字段**，全部走声明式 `Field
 **模板下载**：`BillService.template_bytes()` 写出《CENEP_电费账单导入模板.xlsx》；
 文件名后缀用 `Path.with_name(name + 后缀)`（项目名常含 `2061.8kWp` 这类小数点）。
 
+**V2.5 账单数据分类口径的界面提示（必须可见，口径见 `DATA_MODEL.md` §10）**
+
+| 提示位置 | 必须出现的内容 | 来源 |
+|---|---|---|
+| 导入向导第 4 / 5 步（预览·校验的问题说明列） | **市场化运营费用只作明细留档，不进入任何电价或电费计算口径**；这些市场化交易结算项**已包含在账单总电费里**，再次计入将造成**重复计算**（B/C 类负数表示降低电费支出，勿取绝对值） | `bill_pdf_importer._check_reconciliations` 的中文 `messages` |
+| 「校验提示」页签的 `assumptions` | 逐时电价优先（市场化直购客户**不得**套用湖北政府峰谷系数，该系数仅适用于代理购电客户）；计量分组明细只用于校验与追溯 | `BillReconciliation.assumptions`（`reconcile_bill`） |
+| 全部界面 | 界面**只显示**上述中文说明，**不得**自行判断"哪些字段进模型"或自行取价——口径与取价优先级都在 `calculation/`（§0.2） | `calculation/bill_price_source.py`、`calculation/bill_calculator.py` |
+
 **边界（§0.2 红线）**
 
 1. 界面**不得**出现任何求和 / 差异 / 平均电价公式——全部经 `BillService`；
